@@ -1,0 +1,41 @@
+{
+  "name": "@netbeat/prolink",
+  "version": "0.0.0",
+  "description": "Read-only observer for Pioneer Pro DJ Link network traffic.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Cameron Tacklind <cameron@tacklind.com>",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pioneer",
+    "pro-dj-link",
+    "prolink",
+    "cdj",
+    "xdj",
+    "djm",
+    "rekordbox",
+    "dj",
+    "network",
+    "observer"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@netbeat/cli",
+  "version": "0.0.0",
+  "description": "Diagnostic CLI for observing DJ hardware on the network.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Cameron Tacklind <cameron@tacklind.com>",
+  "bin": {
+    "netbeat": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build",
+    "start": "bun run src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@netbeat/prolink": "workspace:*"
+  },
+  "keywords": [
+    "dj",
+    "pioneer",
+    "pro-dj-link",
+    "cli",
+    "diagnostic"
+  ]
+}

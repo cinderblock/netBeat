@@ -1,0 +1,34 @@
+{
+  "name": "netbeat",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Observe DJ hardware over the network for live sync (read-only).",
+  "type": "module",
+  "license": "MIT",
+  "author": "Cameron Tacklind <cameron@tacklind.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cinderblock/netBeat.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build",
+    "test": "bun test",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "bun@1.3.0",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}
