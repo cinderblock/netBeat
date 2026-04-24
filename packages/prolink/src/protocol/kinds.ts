@@ -47,7 +47,7 @@ export const BeatKind = {
   MASTER_HANDOFF_REQUEST: 0x26,
   /** Master-handoff takeover response. */
   MASTER_HANDOFF_RESPONSE: 0x27,
-  /** Beat packet — 60 bytes, one per beat while playing. */
+  /** Beat packet — 96 bytes (`0x60`), one per beat while playing. */
   BEAT: 0x28,
   /** Sync control (turn sync on/off, force master). */
   SYNC_CONTROL: 0x2a,

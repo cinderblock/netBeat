@@ -5,8 +5,10 @@ mode — so that other software (lighting, visuals, DMX, show-control) can
 synchronize itself to what a DJ is doing live without needing to analyze the
 audio stream.
 
-> **Status:** pre-alpha. Observer mode (device discovery via keep-alive
-> packets) works end-to-end; beat and status parsing are in progress.
+> **Status:** pre-alpha. Observer mode works end-to-end with live beat
+> sync, CDJ status, mixer status, channels-on-air, and CDJ-3000 absolute
+> position. Verified against real XDJ-XZ hardware. Metadata/track-info
+> queries are not yet implemented.
 
 ## Goals
 
@@ -29,7 +31,7 @@ audio stream.
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | planned, first focus | Most prior art exists here |
+| Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | **active** | Beat sync, status, phase tracking working. Metadata deferred. |
 | Denon StageLinQ (Prime series) | future | Will slot in after the Pioneer surface is stable |
 
 ## Repository layout
@@ -47,6 +49,42 @@ netBeat/
 ├── biome.json
 └── package.json
 ```
+
+## Quick start
+
+```bash
+bun install
+bun run packages/cli/src/index.ts observe --interface 10.255.0.77
+```
+
+This announces as a virtual CDJ on the specified interface and streams
+discovered devices, beats, CDJ status changes, mixer status, and
+channels-on-air to the terminal.
+
+### Capturing data for offline analysis
+
+```bash
+# JSONL output — one JSON object per parsed event
+bun run packages/cli/src/index.ts observe --interface 10.255.0.77 --json > session.jsonl
+
+# Also capture raw packets for debugging
+bun run packages/cli/src/index.ts observe --interface 10.255.0.77 --json --dump raw.jsonl > session.jsonl
+
+# Passive mode (no announce — misses unicast CDJ status)
+bun run packages/cli/src/index.ts observe --interface 10.255.0.77 --passive --json > passive.jsonl
+```
+
+### What data is available
+
+| Event | Source | Notes |
+|-------|--------|-------|
+| `device` | keep-alive (port 50000) | Device appear/disappear, type, IP |
+| `beat` | port 50001, kind 0x28 | BPM, pitch, beat-in-bar (1-4). Requires rekordbox-analyzed tracks. |
+| `status` | port 50002, kind 0x0a | Play state, master/sync/on-air flags, track ID, BPM, pitch |
+| `mixerStatus` | port 50002, kind 0x29 | Standalone DJM master authority, BPM |
+| `onAir` | port 50001, kind 0x03 | Per-channel on-air state from DJM mixers |
+| `position` | port 50001, kind 0x0b | CDJ-3000 only: playhead ms, track length, pitch, BPM |
+| `phase` | computed | Sub-beat/bar phase interpolated between beats |
 
 ## Prior art
 

@@ -35,7 +35,38 @@ export {
   type NetworkInterfaceInfo,
 } from './observer/identity.js';
 // Observer
-export { Observer, type ObserverOptions, type RawPacketHandler } from './observer/index.js';
+export {
+  type AbsolutePositionHandler,
+  type BeatHandler,
+  type DeckState,
+  type MixerStatusHandler,
+  Observer,
+  type ObserverOptions,
+  type OnAirHandler,
+  type RawPacketHandler,
+  type StatusHandler,
+} from './observer/index.js';
+export {
+  type PhaseState,
+  PhaseTracker,
+  type PhaseTrackerOptions,
+} from './observer/phase-tracker.js';
+export {
+  ABSOLUTE_POSITION_LENGTH,
+  ABSOLUTE_POSITION_MIN_LENGTH,
+  type AbsolutePosition,
+  type BuildAbsolutePositionOptions,
+  buildAbsolutePosition,
+  parseAbsolutePosition,
+} from './packets/absolute-position.js';
+export {
+  BEAT_LENGTH,
+  type BuildBeatOptions,
+  buildBeat,
+  decodePitch,
+  encodePitch,
+  parseBeat,
+} from './packets/beat.js';
 export {
   buildKeepAlive,
   classifyDeviceType,
@@ -43,9 +74,40 @@ export {
   KEEP_ALIVE_LENGTH,
   parseKeepAlive,
 } from './packets/keepalive.js';
+export {
+  type BuildMixerStatusOptions,
+  buildMixerStatus,
+  MIXER_STATUS_LENGTH,
+  parseMixerStatus,
+} from './packets/mixer-status.js';
+export {
+  type BuildOnAirOptions,
+  buildOnAir,
+  type ChannelsOnAir,
+  ON_AIR_6CH_LENGTH,
+  ON_AIR_MIN_LENGTH,
+  parseOnAir,
+} from './packets/on-air.js';
+export {
+  type BuildStatusOptions,
+  buildStatus,
+  PlayState,
+  parseStatus,
+  STATUS_LENGTH,
+  STATUS_MIN_LENGTH,
+  TrackSlot,
+  TrackType,
+} from './packets/status.js';
 // Packet types and parsing
-export type { Device, DeviceType, SelfIdentity } from './packets/types.js';
-export { DEVICE_TYPE_BYTE } from './packets/types.js';
+export type {
+  Beat,
+  CdjStatus,
+  Device,
+  DeviceType,
+  MixerStatus,
+  SelfIdentity,
+} from './packets/types.js';
+export { BEAT_TIMING_TRACK_ENDS, DEVICE_TYPE_BYTE } from './packets/types.js';
 export {
   hasProlinkHeader,
   KIND_OFFSET,
