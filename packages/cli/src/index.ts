@@ -29,6 +29,7 @@ import {
   type DeckBeatInfo,
   formatDeviceId,
   PROTOCOL as STAGELINQ_PROTOCOL,
+  type StageLinqDevice,
   Observer as StageLinqObserver,
 } from '@netbeat/stagelinq';
 
@@ -284,7 +285,7 @@ async function runObserve(argv: string[]): Promise<void> {
     if (jsonMode) {
       console.log(JSON.stringify(jsonBeat(beat)));
       // Also emit the interpolated phase at beat boundary
-      const phase = observer.getPhase(beat.deviceId);
+      const phase = observer.getPhase(`prolink:${beat.deviceId}`);
       if (phase) console.log(JSON.stringify(jsonPhase(phase)));
     } else {
       console.log(
@@ -475,7 +476,8 @@ async function runStageLinqObserve(values: {
 
   // ---- Device events ----
 
-  observer.onDevice((event, device) => {
+  observer.onDevice((event, dev) => {
+    const device = dev as StageLinqDevice;
     if (jsonMode) {
       console.log(
         JSON.stringify({
@@ -597,7 +599,8 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
 
   // ---- Device events ----
 
-  observer.onDevice((event, device) => {
+  observer.onDevice((event, dev) => {
+    const device = dev as StageLinqDevice;
     if (event === 'added') {
       printTrackLine(
         `${ANSI_DIM}${new Date().toLocaleTimeString('en-US', { hour12: false })}${ANSI_RESET}` +
