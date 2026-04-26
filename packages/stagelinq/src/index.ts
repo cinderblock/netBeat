@@ -33,6 +33,7 @@ export {
 } from './observer/device-manager.js';
 // Observer
 export { Observer, type ObserverOptions } from './observer/index.js';
+export { PhaseTracker, type PhaseTrackerOptions } from './observer/phase-tracker.js';
 export type {
   BeatInfoHandler,
   DeckState,

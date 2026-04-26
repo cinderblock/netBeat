@@ -31,6 +31,20 @@ describe('DeviceManager', () => {
     expect(dm.list().length).toBe(1);
   });
 
+  test('device includes common Device fields from @netbeat/core', () => {
+    const dm = new DeviceManager();
+    dm.ingest(makeDiscovery(), '192.168.1.100');
+
+    const device = dm.list()[0];
+    expect(device).toBeDefined();
+    expect(device?.id).toBe('stagelinq:01234567-89ab-cdef-0123-456789abcdef');
+    expect(device?.name).toBe('SC6000');
+    expect(device?.category).toBe('player');
+    expect(device?.address).toBe('192.168.1.100');
+    expect(device?.deckCount).toBe(2);
+    expect(device?.protocol).toBe('stagelinq');
+  });
+
   test('ingest LOGIN again emits "updated"', () => {
     const events: [DeviceEventType, StageLinqDevice][] = [];
     const dm = new DeviceManager();

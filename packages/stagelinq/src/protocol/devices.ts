@@ -6,8 +6,9 @@
  * device categories.
  */
 
-/** High-level device classification. */
-export type DeviceCategory = 'player' | 'controller' | 'mixer' | 'other';
+import type { DeviceCategory } from '@netbeat/core';
+
+export type { DeviceCategory };
 
 export interface DeviceModel {
   /** Internal model code from the software name field (e.g. "JP13"). */
@@ -46,7 +47,7 @@ const MODEL_MAP: ReadonlyMap<string, DeviceModel> = new Map([
   ['JM10', { code: 'JM10', name: 'X1850', category: 'mixer', deckCount: 0 }],
 
   // Other
-  ['JC20', { code: 'JC20', name: 'LC6000', category: 'other', deckCount: 0 }],
+  ['JC20', { code: 'JC20', name: 'LC6000', category: 'unknown', deckCount: 0 }],
 ]);
 
 /**
@@ -66,7 +67,7 @@ export function classifyDevice(softwareName: string): DeviceModel {
     MODEL_MAP.get(softwareName) ?? {
       code: softwareName,
       name: softwareName,
-      category: 'other' as const,
+      category: 'unknown' as const,
       deckCount: 0,
     }
   );

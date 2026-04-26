@@ -57,11 +57,18 @@ export class DeviceManager {
 
     const model = classifyDevice(msg.softwareName);
     const device: StageLinqDevice = {
+      // Common Device fields (from @netbeat/core)
+      id: `stagelinq:${formatDeviceId(msg.deviceId)}`,
+      name: model.name,
+      category: model.category,
+      address,
+      deckCount: model.deckCount,
+      protocol: 'stagelinq',
+      // StageLinQ-specific fields
       deviceId: msg.deviceId,
       source: msg.source,
       model,
       softwareVersion: msg.softwareVersion,
-      address,
       directoryPort: msg.port,
       lastSeen: this.now(),
     };

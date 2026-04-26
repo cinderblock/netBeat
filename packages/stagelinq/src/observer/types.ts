@@ -1,13 +1,19 @@
 /**
  * Public types for the StageLinQ observer.
+ *
+ * `StageLinqDevice` and `DeckState` extend the common types from
+ * `@netbeat/core`, adding StageLinQ-specific fields. Thanks to structural
+ * typing, they satisfy the common interfaces automatically.
  */
 
+import type { DeckState as CoreDeckState, Device as CoreDevice, DeviceEvent } from '@netbeat/core';
 import type { DeviceId } from '../protocol/device-id.js';
-import type { DeviceCategory, DeviceModel } from '../protocol/devices.js';
+import type { DeviceModel } from '../protocol/devices.js';
 import type { DeckBeatInfo } from '../services/beat-info.js';
 
 /** A discovered StageLinQ device on the network. */
-export interface StageLinqDevice {
+export interface StageLinqDevice extends CoreDevice {
+  readonly protocol: 'stagelinq';
   /** 16-byte UUID identifying the device. */
   readonly deviceId: DeviceId;
   /** Source identifier from discovery (usually hostname). */
@@ -16,8 +22,6 @@ export interface StageLinqDevice {
   readonly model: DeviceModel;
   /** Software version string. */
   readonly softwareVersion: string;
-  /** Network address of the device. */
-  readonly address: string;
   /** TCP port for the device's Directory service. */
   readonly directoryPort: number;
   /** Timestamp (ms) when last seen via discovery. */
@@ -25,19 +29,15 @@ export interface StageLinqDevice {
 }
 
 /** Device lifecycle event type. */
-export type DeviceEventType = 'added' | 'updated' | 'removed';
+export type DeviceEventType = DeviceEvent;
 
 /** Callback for device lifecycle events. */
 export type DeviceListener = (event: DeviceEventType, device: StageLinqDevice) => void;
 
-/** Per-deck state snapshot from StateMap subscriptions. */
-export interface DeckState {
-  /** Deck number (1-based). */
-  readonly deckNumber: number;
-  /** Whether the deck is currently playing. */
-  readonly isPlaying: boolean;
-  /** Current BPM (0 if unknown). */
-  readonly bpm: number;
+/** Per-deck state snapshot, extending the common DeckState with StageLinQ specifics. */
+export interface DeckState extends CoreDeckState {
+  /** The StageLinQ device this deck belongs to. */
+  readonly device: StageLinqDevice;
   /** Playback speed / pitch (1.0 = normal). */
   readonly speed: number;
   /** Track name, if loaded. */
@@ -60,9 +60,9 @@ export interface DeviceState {
   readonly device: StageLinqDevice;
   /** Per-deck state snapshots. */
   readonly decks: readonly DeckState[];
-  /** Mixer crossfader position (0.0–1.0), if available. */
+  /** Mixer crossfader position (0.0-1.0), if available. */
   readonly crossfaderPosition: number | null;
-  /** Per-channel fader positions (0.0–1.0), keyed by channel number. */
+  /** Per-channel fader positions (0.0-1.0), keyed by channel number. */
   readonly channelFaders: ReadonlyMap<number, number>;
 }
 
@@ -77,4 +77,4 @@ export type BeatInfoHandler = (
 ) => void;
 
 /** Device category re-export for consumers. */
-export type { DeviceCategory, DeviceModel };
+export type { DeviceCategory, DeviceModel } from '../protocol/devices.js';

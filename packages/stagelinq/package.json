@@ -18,6 +18,9 @@
     "src",
     "README.md"
   ],
+  "dependencies": {
+    "@netbeat/core": "workspace:*"
+  },
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean",

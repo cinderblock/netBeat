@@ -24,6 +24,12 @@
 
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
 import { connect, createServer, type Server, type Socket as TcpSocket } from 'node:net';
+import type {
+  DeviceListener as CoreDeviceListener,
+  Observer as CoreObserver,
+  DeckUpdateListener,
+  PhaseState,
+} from '@netbeat/core';
 import {
   type DeviceId,
   deviceIdEquals,
@@ -48,10 +54,10 @@ import {
 } from '../services/state-map.js';
 import { defaultStatePaths } from '../services/state-paths.js';
 import { DeviceManager, type DeviceManagerOptions } from './device-manager.js';
+import { PhaseTracker } from './phase-tracker.js';
 import type {
   BeatInfoHandler,
   DeckState,
-  DeviceListener,
   DeviceState,
   StageLinqDevice,
   StateChangeHandler,
@@ -97,7 +103,7 @@ interface DeviceConnection {
  * Observer mode orchestrator for StageLinQ. Owns discovery, device manager,
  * and per-device service connections.
  */
-export class Observer {
+export class Observer implements CoreObserver {
   private readonly name: string;
   private readonly version: string;
   private readonly bindAddress: string;
@@ -107,8 +113,10 @@ export class Observer {
   private readonly deviceManager: DeviceManager;
   private readonly statePaths: readonly string[];
   private readonly subscribeBeatInfo: boolean;
+  private readonly phaseTracker: PhaseTracker;
 
-  private readonly deviceListeners = new Set<DeviceListener>();
+  private readonly deviceListeners = new Set<CoreDeviceListener>();
+  private readonly deckUpdateListeners = new Set<DeckUpdateListener>();
   private readonly stateChangeHandlers = new Set<StateChangeHandler>();
   private readonly beatInfoHandlers = new Set<BeatInfoHandler>();
 
@@ -131,6 +139,7 @@ export class Observer {
     this.subscribeBeatInfo = options.beatInfo ?? true;
 
     this.deviceManager = new DeviceManager(options.deviceManager);
+    this.phaseTracker = new PhaseTracker();
 
     // Determine state paths: use provided, or generate defaults based on
     // discovered device deck count (we'll use 4 as default for subscriptions
@@ -157,10 +166,18 @@ export class Observer {
   }
 
   /** Subscribe to device add/update/remove events. Returns an unsubscribe fn. */
-  onDevice(listener: DeviceListener): () => void {
+  onDevice(listener: CoreDeviceListener): () => void {
     this.deviceListeners.add(listener);
     return () => {
       this.deviceListeners.delete(listener);
+    };
+  }
+
+  /** Subscribe to deck state changes. Returns an unsubscribe fn. */
+  onDeckUpdate(listener: DeckUpdateListener): () => void {
+    this.deckUpdateListeners.add(listener);
+    return () => {
+      this.deckUpdateListeners.delete(listener);
     };
   }
 
@@ -203,11 +220,78 @@ export class Observer {
     return [...this.connections.values()].map((conn) => this.buildDeviceState(conn));
   }
 
+  /** All deck states across all connected devices. */
+  decks(): DeckState[] {
+    const result: DeckState[] = [];
+    for (const conn of this.connections.values()) {
+      const deckCount = conn.device.model.deckCount || 2;
+      for (let d = 1; d <= deckCount; d++) {
+        result.push(this.buildDeckState(conn, d));
+      }
+    }
+    return result;
+  }
+
+  /** Get a deck by its opaque string ID (e.g. "stagelinq:{uuid}:{deck}"). */
+  getDeck(deckId: string): DeckState | null {
+    const parsed = parseStageLinqDeckId(deckId);
+    if (!parsed) return null;
+    const conn = this.connections.get(parsed.deviceUuid);
+    if (!conn) return null;
+    return this.buildDeckState(conn, parsed.deckNumber);
+  }
+
   /**
-   * Get the deck state for a specific deck on a specific device.
-   * Returns `null` if the device or deck is not found.
+   * Best-available phase right now. Prefers playing decks.
+   * Designed to be polled in a render loop.
    */
-  getDeck(deviceId: DeviceId, deckNumber: number): DeckState | null {
+  get phase(): PhaseState | null {
+    // First pass: playing decks.
+    for (const conn of this.connections.values()) {
+      const deckCount = conn.device.model.deckCount || 2;
+      for (let d = 1; d <= deckCount; d++) {
+        const prefix = `/Engine/Deck${d}`;
+        const play = conn.stateValues.get(`${prefix}/Play`);
+        if (play !== true && play !== 1) continue;
+        const deckId = this.makeDeckId(conn, d);
+        const phase = this.phaseTracker.getPhase(deckId);
+        if (phase) return phase;
+      }
+    }
+    // Second pass: any deck with phase data.
+    for (const conn of this.connections.values()) {
+      const deckCount = conn.device.model.deckCount || 2;
+      for (let d = 1; d <= deckCount; d++) {
+        const phase = this.phaseTracker.getPhase(this.makeDeckId(conn, d));
+        if (phase) return phase;
+      }
+    }
+    return null;
+  }
+
+  /** Phase for a specific deck by its opaque string ID. */
+  getPhase(deckId: string): PhaseState | null {
+    return this.phaseTracker.getPhase(deckId);
+  }
+
+  /** Phase for all decks that have active beat data. */
+  phases(): PhaseState[] {
+    const result: PhaseState[] = [];
+    for (const conn of this.connections.values()) {
+      const deckCount = conn.device.model.deckCount || 2;
+      for (let d = 1; d <= deckCount; d++) {
+        const phase = this.phaseTracker.getPhase(this.makeDeckId(conn, d));
+        if (phase) result.push(phase);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Get the deck state for a specific deck on a specific device (legacy API).
+   * Prefer `getDeck(deckId)` for the common interface.
+   */
+  getDeckByDevice(deviceId: DeviceId, deckNumber: number): DeckState | null {
     const state = this.getDeviceState(deviceId);
     if (!state) return null;
     return state.decks.find((d) => d.deckNumber === deckNumber) ?? null;
@@ -410,6 +494,12 @@ export class Observer {
     const conn = this.connections.get(key);
     if (!conn) return;
 
+    // Clean up phase tracker entries for this device's decks.
+    const deckCount = conn.device.model.deckCount || 2;
+    for (let d = 1; d <= deckCount; d++) {
+      this.phaseTracker.remove(this.makeDeckId(conn, d));
+    }
+
     for (const sock of conn.sockets) {
       sock.destroy();
     }
@@ -494,7 +584,19 @@ export class Observer {
       const value = parseStateValue(update.jsonValue);
       conn.stateValues.set(update.path, value);
 
-      // Emit to consumers.
+      // Check if this state change should trigger a deck update.
+      const deckMatch = DECK_UPDATE_RE.exec(update.path);
+      if (deckMatch?.[1]) {
+        this.emitDeckUpdate(conn, Number.parseInt(deckMatch[1], 10));
+      } else {
+        const faderMatch = FADER_RE.exec(update.path);
+        if (faderMatch?.[1]) {
+          // Channel fader change affects that deck's isOnAir.
+          this.emitDeckUpdate(conn, Number.parseInt(faderMatch[1], 10));
+        }
+      }
+
+      // Emit to stagelinq-specific consumers.
       for (const handler of this.stateChangeHandlers) {
         try {
           handler(conn.device, update.path, value);
@@ -534,12 +636,14 @@ export class Observer {
       const beatInfo = parseBeatInfoMessage(payload);
       if (!beatInfo) return;
 
-      // Update per-deck beat state.
+      // Update per-deck beat state and phase tracker.
       conn.beatInfoClock = beatInfo.clock;
       for (let i = 0; i < beatInfo.decks.length; i++) {
         const deck = beatInfo.decks[i];
         if (deck) {
-          conn.beatInfoDecks.set(i + 1, deck); // 1-based deck numbering
+          const deckNum = i + 1; // 1-based deck numbering
+          conn.beatInfoDecks.set(deckNum, deck);
+          this.phaseTracker.update(this.makeDeckId(conn, deckNum), deck);
         }
       }
 
@@ -594,6 +698,7 @@ export class Observer {
 
   private buildDeckState(conn: DeviceConnection, deckNumber: number): DeckState {
     const prefix = `/Engine/Deck${deckNumber}`;
+    const deckId = this.makeDeckId(conn, deckNumber);
 
     const play = conn.stateValues.get(`${prefix}/Play`);
     const bpm = conn.stateValues.get(`${prefix}/CurrentBPM`);
@@ -605,18 +710,74 @@ export class Observer {
     const syncMode = conn.stateValues.get(`${prefix}/Track/SyncMode`);
 
     const beatInfo = conn.beatInfoDecks.get(deckNumber) ?? null;
+    const isPlaying = play === true || play === 1;
+    const effectiveBpm = typeof bpm === 'number' ? bpm : (beatInfo?.bpm ?? 0);
+    const title = typeof songName === 'string' ? songName : null;
+    const artist = typeof artistName === 'string' ? artistName : null;
+
+    // Channel fader for on-air heuristic (deck N -> channel N).
+    const fader = conn.stateValues.get(`/Mixer/CH${deckNumber}faderPosition`);
+    const isOnAir = typeof fader === 'number' ? fader > 0 : true;
 
     return {
+      // Common DeckState fields (from @netbeat/core)
+      id: deckId,
+      device: conn.device,
       deckNumber,
-      isPlaying: play === true || play === 1,
-      bpm: typeof bpm === 'number' ? bpm : (beatInfo?.bpm ?? 0),
+      isPlaying,
+      bpm: effectiveBpm,
+      phase: this.phaseTracker.getPhase(deckId),
+      isMaster: false,
+      isOnAir,
+      track: title || artist ? { title, artist } : null,
+      // StageLinQ-specific fields
       speed: typeof speed === 'number' ? speed : 1,
-      trackName: typeof songName === 'string' ? songName : null,
-      artistName: typeof artistName === 'string' ? artistName : null,
+      trackName: title,
+      artistName: artist,
       trackLength: typeof trackLength === 'number' ? trackLength : 0,
       trackLoaded: songLoaded === true || songLoaded === 1,
       syncMode: typeof syncMode === 'string' ? syncMode : null,
       beatInfo,
     };
   }
+
+  /** Build a deck ID string for the common interface. */
+  private makeDeckId(conn: DeviceConnection, deckNumber: number): string {
+    return `stagelinq:${formatDeviceId(conn.device.deviceId)}:${deckNumber}`;
+  }
+
+  /** Emit a deck update to all listeners. */
+  private emitDeckUpdate(conn: DeviceConnection, deckNumber: number): void {
+    if (this.deckUpdateListeners.size === 0) return;
+    const deck = this.buildDeckState(conn, deckNumber);
+    for (const listener of this.deckUpdateListeners) {
+      try {
+        listener(deck);
+      } catch {
+        // Consumer errors must not break the observer.
+      }
+    }
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/** Deck-update trigger paths (regex → extracts deck number). */
+const DECK_UPDATE_RE =
+  /^\/Engine\/Deck(\d+)\/(Play|CurrentBPM|Speed|Track\/SongName|Track\/ArtistName|Track\/SongLoaded)$/;
+const FADER_RE = /^\/Mixer\/CH(\d+)faderPosition$/;
+
+/**
+ * Parse a stagelinq deck ID into its components.
+ * Format: `"stagelinq:{uuid}:{deckNum}"`.
+ */
+function parseStageLinqDeckId(deckId: string): { deviceUuid: string; deckNumber: number } | null {
+  if (!deckId.startsWith('stagelinq:')) return null;
+  const rest = deckId.slice(10);
+  const lastColon = rest.lastIndexOf(':');
+  if (lastColon < 0) return null;
+  const deviceUuid = rest.slice(0, lastColon);
+  const deckNumber = Number.parseInt(rest.slice(lastColon + 1), 10);
+  if (Number.isNaN(deckNumber)) return null;
+  return { deviceUuid, deckNumber };
 }

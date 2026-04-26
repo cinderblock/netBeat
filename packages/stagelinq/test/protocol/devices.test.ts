@@ -36,7 +36,7 @@ describe('Device classification', () => {
     const model = classifyDevice('XX99');
     expect(model.code).toBe('XX99');
     expect(model.name).toBe('XX99');
-    expect(model.category).toBe('other');
+    expect(model.category).toBe('unknown');
     expect(model.deckCount).toBe(0);
   });
 
