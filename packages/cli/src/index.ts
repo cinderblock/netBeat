@@ -709,6 +709,15 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
       lines++;
     }
 
+    // Clear leftover lines from a previous frame that had more decks.
+    const staleLines = pulseLineCount - lines;
+    if (staleLines > 0) {
+      for (let i = 0; i < staleLines; i++) {
+        frame += `${ANSI_CLEAR_LINE}\n`;
+      }
+      frame += `\x1b[${staleLines}A`;
+    }
+
     process.stdout.write(frame);
     pulseLineCount = lines;
   }
@@ -921,6 +930,15 @@ async function runPulse(argv: string[]): Promise<void> {
 
       frame += `  ${phase.playerId}  ${bar}  ${fmtBpm(phase.bpm)}${phraseStr}\n`;
       lines++;
+    }
+
+    // Clear leftover lines from a previous frame that had more decks.
+    const staleLines = pulseLineCount - lines;
+    if (staleLines > 0) {
+      for (let i = 0; i < staleLines; i++) {
+        frame += `${ANSI_CLEAR_LINE}\n`;
+      }
+      frame += `\x1b[${staleLines}A`;
     }
 
     process.stdout.write(frame);
