@@ -8,7 +8,9 @@ audio stream.
 > **Status:** pre-alpha. Observer mode works end-to-end with live beat
 > sync, CDJ status, mixer status, channels-on-air, CDJ-3000 absolute
 > position, and track metadata (phrases, beat grid, cues) via NFS or
-> local USB export. Verified against real XDJ-XZ hardware.
+> local USB export. Verified against real XDJ-XZ hardware. Denon
+> StageLinQ support is implemented but not yet validated against
+> hardware.
 
 ## Goals
 
@@ -34,6 +36,36 @@ audio stream.
 | Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | **active** | Beat sync, status, phase tracking, track metadata (phrases, beat grid, cues via NFS/filesystem). |
 | Denon StageLinQ (Prime series) | **in progress** | Discovery, StateMap, BeatInfo services implemented. Not yet validated against hardware. |
 
+## Unified API
+
+All three observer packages implement the same `Observer` interface from
+`@netbeat/core`. Code that targets the common interface works with any
+hardware — Pioneer, Denon, or both at once:
+
+```ts
+import { UnifiedObserver } from '@netbeat/core';
+import { Observer as Prolink } from '@netbeat/prolink';
+import { Observer as StageLinq } from '@netbeat/stagelinq';
+
+// Auto-detect both Pioneer and Denon gear
+const observer = new UnifiedObserver([
+  new Prolink({ identity: buildIdentity({ interface: 'Ethernet' }) }),
+  new StageLinq(),
+]);
+await observer.start();
+
+// Poll in a render loop — works regardless of which hardware is playing
+const phase = observer.phase;
+if (phase) setLightIntensity(Math.sin(phase.beat * 2 * Math.PI));
+```
+
+Or target a single protocol:
+
+```ts
+import { Observer } from '@netbeat/prolink';   // same interface
+import { Observer } from '@netbeat/stagelinq'; // same interface
+```
+
 ## Repository layout
 
 This is a [Bun workspaces](https://bun.sh/docs/install/workspaces) monorepo.
@@ -41,6 +73,7 @@ This is a [Bun workspaces](https://bun.sh/docs/install/workspaces) monorepo.
 ```
 netBeat/
 ├── packages/
+│   ├── core/       # Common types (Device, DeckState, PhaseState, Observer) + UnifiedObserver
 │   ├── prolink/    # Pioneer Pro DJ Link protocol implementation
 │   ├── stagelinq/  # Denon StageLinQ protocol implementation
 │   └── cli/        # Diagnostic CLI (sniff / dump state from real hardware)
@@ -55,45 +88,40 @@ netBeat/
 
 ```bash
 bun install
-bun run packages/cli/src/index.ts observe --interface 10.255.0.77
 ```
-
-This announces as a virtual CDJ on the specified interface and streams
-discovered devices, beats, CDJ status changes, mixer status, and
-channels-on-air to the terminal.
 
 ### Live beat pulse display
 
+The `pulse` command shows a pulsing beat indicator per deck that flashes
+in sync with the music (cyan on downbeat, white on beats 2–4). Track
+names print as they load.
+
 ```bash
-# Minimal — pulsing beat indicator per deck, track IDs on load
+# Denon Prime-series (SC6000, PRIME 4, SC LIVE, etc.) — zero config
+bun run packages/cli/src/index.ts pulse --protocol stagelinq
+
+# Pioneer (CDJs, XDJs, DJM mixers) — specify your DJ network interface
 bun run packages/cli/src/index.ts pulse --interface 10.255.0.77
 
-# With metadata — track names, BPM, key, and current phrase section
+# Pioneer with full metadata — track names, BPM, key, live phrase labels
 bun run packages/cli/src/index.ts pulse --interface 10.255.0.77 --media /path/to/usb
 ```
 
-Shows a 4-dot beat bar per deck that flashes in sync with the music
-(cyan on downbeat, white on beats 2–4, smooth 24-bit color fade).
-Track loads print as permanent log lines; with `--media` pointed at a
-rekordbox USB export, you also get artist/title/key and live phrase
-labels (intro, chorus, outro, etc.).
+### Detailed event stream
 
-### Denon StageLinQ mode
+The `observe` command streams every discovered device and real-time event
+to the terminal.
 
 ```bash
-# Observe Denon Prime-series devices on the network
+# Pioneer
+bun run packages/cli/src/index.ts observe --interface 10.255.0.77
+
+# Denon
 bun run packages/cli/src/index.ts observe --protocol stagelinq
 
-# Live beat pulse from Denon gear
-bun run packages/cli/src/index.ts pulse --protocol stagelinq
-
-# JSON output for integration with other tools
-bun run packages/cli/src/index.ts observe --protocol stagelinq --json > stagelinq.jsonl
+# JSON output for piping to other tools
+bun run packages/cli/src/index.ts observe --protocol stagelinq --json > session.jsonl
 ```
-
-StageLinQ mode discovers Denon devices (SC6000, PRIME 4, SC LIVE, etc.),
-subscribes to real-time state changes and beat data, and displays per-deck
-status. Track names appear as they load.
 
 ### Capturing data for offline analysis
 
