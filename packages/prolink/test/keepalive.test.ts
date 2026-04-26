@@ -95,9 +95,14 @@ describe('parseKeepAlive', () => {
     const device = parseKeepAlive(packet);
     expect(device).not.toBeNull();
     if (!device) return;
-    expect(device.id).toBe(TEST_IDENTITY.id);
+    expect(device.playerId).toBe(TEST_IDENTITY.id);
+    expect(device.id).toBe(`prolink:${TEST_IDENTITY.id}`);
     expect(device.name).toBe(TEST_IDENTITY.name);
     expect(device.ip).toBe(TEST_IDENTITY.ip);
+    expect(device.address).toBe(TEST_IDENTITY.ip);
+    expect(device.category).toBe('player');
+    expect(device.deckCount).toBe(1);
+    expect(device.protocol).toBe('prolink');
     expect(Array.from(device.mac)).toEqual(Array.from(TEST_IDENTITY.mac));
     expect(device.rawType).toBe(TEST_IDENTITY.rawType);
     expect(device.type).toBe('cdj');
@@ -142,6 +147,8 @@ describe('parseKeepAlive', () => {
     });
     const device = parseKeepAlive(packet);
     expect(device?.type).toBe('mixer');
-    expect(device?.id).toBe(0x21);
+    expect(device?.playerId).toBe(0x21);
+    expect(device?.category).toBe('mixer');
+    expect(device?.deckCount).toBe(0);
   });
 });

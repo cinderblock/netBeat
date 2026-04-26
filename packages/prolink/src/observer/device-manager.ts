@@ -77,23 +77,23 @@ export class DeviceManager {
 
   /** Snapshot of currently known devices, ordered by player number. */
   list(): Device[] {
-    return [...this.devices.values()].sort((a, b) => a.id - b.id);
+    return [...this.devices.values()].sort((a, b) => a.playerId - b.playerId);
   }
 
   /** Look up a device by player number, or `undefined` if unknown. */
-  get(id: number): Device | undefined {
-    return this.devices.get(id);
+  get(playerId: number): Device | undefined {
+    return this.devices.get(playerId);
   }
 
   /**
    * Ingest a freshly parsed keep-alive. Emits `'added'` the first time we
-   * see an ID, and `'updated'` for every subsequent keep-alive (even if
-   * nothing about the device changed — `lastSeen` always moves forward,
+   * see a player ID, and `'updated'` for every subsequent keep-alive (even
+   * if nothing about the device changed — `lastSeen` always moves forward,
    * and consumers may care about the liveness heartbeat).
    */
   ingest(device: Device): void {
-    const existing = this.devices.get(device.id);
-    this.devices.set(device.id, device);
+    const existing = this.devices.get(device.playerId);
+    this.devices.set(device.playerId, device);
     this.emit(existing ? 'updated' : 'added', device);
   }
 

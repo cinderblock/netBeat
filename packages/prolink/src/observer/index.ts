@@ -28,6 +28,7 @@
  */
 
 import type { RemoteInfo } from 'node:dgram';
+import type { Observer as CoreObserver, DeckUpdateListener, TrackInfo } from '@netbeat/core';
 import type { MetadataStore } from '../metadata/media-reader.js';
 import type { TrackAnalysis } from '../metadata/types.js';
 import { type AbsolutePosition, parseAbsolutePosition } from '../packets/absolute-position.js';
@@ -107,31 +108,47 @@ export type TrackAnalysisHandler = (playerId: number, analysis: TrackAnalysis) =
 
 /**
  * Aggregated snapshot of everything known about a single deck (or mixer)
- * at a point in time. Composes data from multiple packet sources:
+ * at a point in time.
  *
- * - `device` — from keep-alive packets (always present)
- * - `status` — from CDJ status packets (observer mode only; null in
- *   passive mode or for non-CDJ devices)
- * - `phase` — interpolated from beat packets (null if no beats received
- *   or player is stale)
- * - `position` — from absolute-position packets (CDJ-3000 only)
+ * Extends the common `DeckState` from `@netbeat/core` with prolink-specific
+ * data: raw CDJ status, absolute position (CDJ-3000), and full track analysis
+ * (beat grid, cues, phrases).
  *
  * ```ts
- * const deck = observer.getDeck(1);
- * if (deck?.status?.isPlaying && deck.phase) {
+ * const deck = observer.getDeck('prolink:1:1');
+ * if (deck?.isPlaying && deck.phase) {
  *   setLightIntensity(Math.sin(deck.phase.beat * 2 * Math.PI));
  * }
  * ```
  */
 export interface DeckState {
-  /** Player number (1–4 CDJ, 33 mixer). */
-  readonly playerId: number;
+  // ── Common fields (from @netbeat/core DeckState) ──
+
+  /** Opaque deck ID: `"prolink:{playerId}:1"`. */
+  readonly id: string;
   /** Device identity from keep-alive packets. */
   readonly device: Device;
-  /** Latest CDJ status. `null` if no status received (passive mode, mixer, or pre-first-status). */
-  readonly status: CdjStatus | null;
+  /** Always 1 for prolink (each CDJ is a single-deck device). */
+  readonly deckNumber: number;
+  /** Whether the deck is actively playing audio. */
+  readonly isPlaying: boolean;
+  /** Effective BPM (pitch-adjusted). 0 if unknown. */
+  readonly bpm: number;
   /** Interpolated phase right now. `null` if no beats received or player is stale. */
   readonly phase: PhaseState | null;
+  /** Whether this deck is the tempo master. */
+  readonly isMaster: boolean;
+  /** Whether this deck's channel is on-air (fader up). */
+  readonly isOnAir: boolean;
+  /** Basic track info (title, artist). `null` if no metadata available. */
+  readonly track: TrackInfo | null;
+
+  // ── Prolink-specific fields ──
+
+  /** Player number (1–4 CDJ, 33 mixer). */
+  readonly playerId: number;
+  /** Latest CDJ status. `null` if no status received (passive mode, mixer, or pre-first-status). */
+  readonly status: CdjStatus | null;
   /** Latest absolute-position (CDJ-3000 only). `null` if device doesn't support it. */
   readonly position: AbsolutePosition | null;
   /** Track analysis (metadata + beat grid + cues + phrases). `null` if no metadata store configured or track not yet fetched. */
@@ -173,8 +190,11 @@ export interface ObserverOptions {
 
 /**
  * Observer mode orchestrator. Owns transport, device manager, announcer.
+ *
+ * Implements the common `Observer` interface from `@netbeat/core`, making it
+ * interchangeable with `@netbeat/stagelinq`'s Observer and `UnifiedObserver`.
  */
-export class Observer {
+export class Observer implements CoreObserver {
   private readonly identity: SelfIdentity;
   private readonly passive: boolean;
   private readonly transport: UdpTransport;
@@ -188,6 +208,7 @@ export class Observer {
   private readonly onAirHandlers = new Set<OnAirHandler>();
   private readonly absolutePositionHandlers = new Set<AbsolutePositionHandler>();
   private readonly trackAnalysisHandlers = new Set<TrackAnalysisHandler>();
+  private readonly deckUpdateListeners = new Set<DeckUpdateListener>();
   /** Latest absolute-position per player (CDJ-3000 only). */
   private readonly positions = new Map<number, AbsolutePosition>();
   /** Latest CDJ status per player. */
@@ -332,12 +353,14 @@ export class Observer {
   }
 
   /**
-   * Interpolated phase for a specific player. Returns `null` if no
-   * beats have been received for that player or it has gone stale.
+   * Interpolated phase for a specific deck by its string ID.
+   * Returns `null` if no beats have been received or the deck is stale.
    *
    * Prefer the `phase` getter unless you need a specific deck.
    */
-  getPhase(playerId: number): PhaseState | null {
+  getPhase(deckId: string): PhaseState | null {
+    const playerId = parseProlinkDeckId(deckId);
+    if (playerId === null) return null;
     return this.phaseTracker.getPhase(playerId);
   }
 
@@ -394,23 +417,29 @@ export class Observer {
   }
 
   /**
-   * Aggregated state for a single deck, combining data from all sources.
-   * Returns `null` if the device has not been seen (no keep-alive received).
+   * Subscribe to deck state changes (common interface). Returns an
+   * unsubscribe function. Fires on CDJ status updates and track analysis
+   * loads — not on every beat (poll `phase` for smooth beat-sync).
+   */
+  onDeckUpdate(listener: DeckUpdateListener): () => void {
+    this.deckUpdateListeners.add(listener);
+    return () => {
+      this.deckUpdateListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Aggregated state for a single deck by its string ID.
+   * Format: `"prolink:{playerId}:1"` or just `"prolink:{playerId}"`.
+   * Returns `null` if the device has not been seen.
    *
    * The `phase` field is computed on-demand via the PhaseTracker, so it
    * reflects the current time, not the time the last packet arrived.
    */
-  getDeck(playerId: number): DeckState | null {
-    const device = this.deviceManager.get(playerId);
-    if (!device) return null;
-    return {
-      playerId,
-      device,
-      status: this.lastStatus.get(playerId) ?? null,
-      phase: this.phaseTracker.getPhase(playerId),
-      position: this.positions.get(playerId) ?? null,
-      trackAnalysis: this.trackAnalysisMap.get(playerId) ?? null,
-    };
+  getDeck(deckId: string): DeckState | null {
+    const playerId = parseProlinkDeckId(deckId);
+    if (playerId === null) return null;
+    return this.buildDeckState(playerId);
   }
 
   /**
@@ -423,14 +452,8 @@ export class Observer {
   decks(): DeckState[] {
     const result: DeckState[] = [];
     for (const device of this.deviceManager.list()) {
-      result.push({
-        playerId: device.id,
-        device,
-        status: this.lastStatus.get(device.id) ?? null,
-        phase: this.phaseTracker.getPhase(device.id),
-        position: this.positions.get(device.id) ?? null,
-        trackAnalysis: this.trackAnalysisMap.get(device.id) ?? null,
-      });
+      const deck = this.buildDeckState(device.playerId);
+      if (deck) result.push(deck);
     }
     return result;
   }
@@ -608,6 +631,9 @@ export class Observer {
             // A faulty consumer handler must not break packet routing.
           }
         }
+
+        // Emit deck update for the common interface.
+        this.emitDeckUpdate(status.deviceId);
       }
     }
 
@@ -668,20 +694,81 @@ export class Observer {
             // A faulty consumer handler must not break the observer.
           }
         }
+        // Emit deck update with new track info.
+        this.emitDeckUpdate(playerId);
       })
       .catch(() => {
         // Metadata fetch failed — silently continue.
       });
   }
 
+  /**
+   * Build the aggregated DeckState for a given player number.
+   * Returns `null` if the device has not been seen.
+   */
+  private buildDeckState(playerId: number): DeckState | null {
+    const device = this.deviceManager.get(playerId);
+    if (!device) return null;
+
+    const status = this.lastStatus.get(playerId) ?? null;
+    const trackAnalysis = this.trackAnalysisMap.get(playerId) ?? null;
+    const metadata = trackAnalysis?.metadata ?? null;
+    const track: TrackInfo | null = metadata
+      ? { title: metadata.title, artist: metadata.artist }
+      : null;
+
+    return {
+      // Common DeckState fields
+      id: `prolink:${playerId}:1`,
+      device,
+      deckNumber: 1,
+      isPlaying: status?.isPlaying ?? false,
+      bpm: status?.effectiveBpm ?? 0,
+      phase: this.phaseTracker.getPhase(playerId),
+      isMaster: status?.isMaster ?? false,
+      isOnAir: status?.isOnAir ?? false,
+      track,
+      // Prolink-specific fields
+      playerId,
+      status,
+      position: this.positions.get(playerId) ?? null,
+      trackAnalysis,
+    };
+  }
+
+  /** Emit onDeckUpdate to all listeners. Swallows consumer errors. */
+  private emitDeckUpdate(playerId: number): void {
+    if (this.deckUpdateListeners.size === 0) return;
+    const deck = this.buildDeckState(playerId);
+    if (!deck) return;
+    for (const listener of this.deckUpdateListeners) {
+      try {
+        listener(deck);
+      } catch {
+        // Consumer errors must not break the observer.
+      }
+    }
+  }
+
   private isSelf(device: Device): boolean {
-    if (device.id !== this.identity.id) return false;
+    if (device.playerId !== this.identity.id) return false;
     if (device.mac.length !== this.identity.mac.length) return false;
     for (let i = 0; i < device.mac.length; i++) {
       if (device.mac[i] !== this.identity.mac[i]) return false;
     }
     return true;
   }
+}
+
+/**
+ * Parse a common deck ID string into a prolink player number.
+ * Accepts `"prolink:{playerId}"` or `"prolink:{playerId}:1"`.
+ * Returns `null` for unrecognized formats.
+ */
+function parseProlinkDeckId(deckId: string): number | null {
+  const match = /^prolink:(\d+)(?::1)?$/u.exec(deckId);
+  if (!match?.[1]) return null;
+  return Number.parseInt(match[1], 10);
 }
 
 /**

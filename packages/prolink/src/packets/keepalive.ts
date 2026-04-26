@@ -31,7 +31,7 @@
 import { KIND_OFFSET, PROLINK_HEADER } from '../protocol/header.js';
 import { DiscoveryKind } from '../protocol/kinds.js';
 import type { Device, SelfIdentity } from './types.js';
-import { DEVICE_TYPE_BYTE, type DeviceType } from './types.js';
+import { DEVICE_TYPE_BYTE, type DeviceType, deviceTypeToCategory } from './types.js';
 
 /** Total length of a keep-alive packet in bytes. */
 export const KEEP_ALIVE_LENGTH = 0x36;
@@ -117,18 +117,26 @@ export function parseKeepAlive(buf: Uint8Array, now: Date = new Date()): Device 
   if (buf[KIND_OFFSET] !== DiscoveryKind.KEEP_ALIVE) return null;
 
   const rawType = buf[OFFSET_DEVICE_TYPE] ?? 0;
-  const id = buf[OFFSET_DEVICE_ID] ?? 0;
+  const playerId = buf[OFFSET_DEVICE_ID] ?? 0;
 
   const name = decodeDeviceName(buf.subarray(OFFSET_NAME, OFFSET_NAME + DEVICE_NAME_MAX_LENGTH));
   const mac = new Uint8Array(buf.subarray(OFFSET_MAC, OFFSET_MAC + MAC_LENGTH));
   const ip = formatIp(buf.subarray(OFFSET_IP, OFFSET_IP + IP_LENGTH));
+  const type = classifyDeviceType(rawType);
 
   return {
-    id,
+    // Common Device fields (from @netbeat/core)
+    id: `prolink:${playerId}`,
     name,
+    category: deviceTypeToCategory(type),
+    address: ip,
+    deckCount: type === 'cdj' ? 1 : 0,
+    protocol: 'prolink' as const,
+    // Prolink-specific fields
+    playerId,
     ip,
     mac,
-    type: classifyDeviceType(rawType),
+    type,
     rawType,
     lastSeen: now,
   };

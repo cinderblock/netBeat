@@ -1,13 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import { type Device, type DeviceEvent, DeviceManager } from '../src/index.ts';
+import { deviceTypeToCategory } from '../src/packets/types.ts';
 
-function makeDevice(overrides: Partial<Device> = {}): Device {
+function makeDevice(
+  overrides: Partial<Omit<Device, 'id' | 'category' | 'address' | 'deckCount' | 'protocol'>> & {
+    playerId?: number;
+  } = {},
+): Device {
+  const playerId = overrides.playerId ?? 1;
+  const type = overrides.type ?? 'cdj';
   return {
-    id: 1,
+    id: `prolink:${playerId}`,
     name: 'CDJ-3000',
+    category: deviceTypeToCategory(type),
+    address: '192.168.1.10',
+    deckCount: type === 'cdj' ? 1 : 0,
+    protocol: 'prolink',
+    playerId,
     ip: '192.168.1.10',
     mac: new Uint8Array([1, 2, 3, 4, 5, 6]),
-    type: 'cdj',
+    type,
     rawType: 0x01,
     lastSeen: new Date('2026-04-21T15:00:00Z'),
     ...overrides,
@@ -15,37 +27,37 @@ function makeDevice(overrides: Partial<Device> = {}): Device {
 }
 
 describe('DeviceManager', () => {
-  test('emits "added" the first time it sees an ID', () => {
+  test('emits "added" the first time it sees a player ID', () => {
     const mgr = new DeviceManager();
     const events: [DeviceEvent, number][] = [];
-    mgr.onEvent((evt, dev) => events.push([evt, dev.id]));
-    mgr.ingest(makeDevice({ id: 1 }));
+    mgr.onEvent((evt, dev) => events.push([evt, dev.playerId]));
+    mgr.ingest(makeDevice({ playerId: 1 }));
     expect(events).toEqual([['added', 1]]);
   });
 
-  test('emits "updated" on subsequent ingests for the same ID', () => {
+  test('emits "updated" on subsequent ingests for the same player ID', () => {
     const mgr = new DeviceManager();
     const events: DeviceEvent[] = [];
     mgr.onEvent((evt) => events.push(evt));
-    mgr.ingest(makeDevice({ id: 1 }));
-    mgr.ingest(makeDevice({ id: 1 }));
-    mgr.ingest(makeDevice({ id: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
     expect(events).toEqual(['added', 'updated', 'updated']);
   });
 
   test('tracks multiple devices independently', () => {
     const mgr = new DeviceManager();
     const events: [DeviceEvent, number][] = [];
-    mgr.onEvent((evt, dev) => events.push([evt, dev.id]));
-    mgr.ingest(makeDevice({ id: 1 }));
-    mgr.ingest(makeDevice({ id: 2 }));
-    mgr.ingest(makeDevice({ id: 0x21, type: 'mixer' }));
+    mgr.onEvent((evt, dev) => events.push([evt, dev.playerId]));
+    mgr.ingest(makeDevice({ playerId: 1 }));
+    mgr.ingest(makeDevice({ playerId: 2 }));
+    mgr.ingest(makeDevice({ playerId: 0x21, type: 'mixer' }));
     expect(events).toEqual([
       ['added', 1],
       ['added', 2],
       ['added', 0x21],
     ]);
-    expect(mgr.list().map((d) => d.id)).toEqual([1, 2, 0x21]);
+    expect(mgr.list().map((d) => d.playerId)).toEqual([1, 2, 0x21]);
   });
 
   test('sweep evicts devices past timeout', () => {
@@ -55,9 +67,9 @@ describe('DeviceManager', () => {
       now: () => new Date(virtualTime),
     });
     const events: [DeviceEvent, number][] = [];
-    mgr.onEvent((evt, dev) => events.push([evt, dev.id]));
+    mgr.onEvent((evt, dev) => events.push([evt, dev.playerId]));
 
-    mgr.ingest(makeDevice({ id: 1, lastSeen: new Date(virtualTime) }));
+    mgr.ingest(makeDevice({ playerId: 1, lastSeen: new Date(virtualTime) }));
     // 500 ms later — still fresh.
     virtualTime += 500;
     mgr.sweep();
@@ -77,7 +89,7 @@ describe('DeviceManager', () => {
     const mgr = new DeviceManager({ timeoutMs: 1000 });
     const events: DeviceEvent[] = [];
     mgr.onEvent((evt) => events.push(evt));
-    mgr.ingest(makeDevice({ id: 1, lastSeen: new Date() }));
+    mgr.ingest(makeDevice({ playerId: 1, lastSeen: new Date() }));
     mgr.sweep();
     expect(events).toEqual(['added']);
   });
@@ -86,9 +98,9 @@ describe('DeviceManager', () => {
     const mgr = new DeviceManager();
     const events: DeviceEvent[] = [];
     const unsubscribe = mgr.onEvent((evt) => events.push(evt));
-    mgr.ingest(makeDevice({ id: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
     unsubscribe();
-    mgr.ingest(makeDevice({ id: 2 }));
+    mgr.ingest(makeDevice({ playerId: 2 }));
     expect(events).toEqual(['added']);
   });
 
@@ -102,7 +114,7 @@ describe('DeviceManager', () => {
     mgr.onEvent(() => {
       calls.push('ok');
     });
-    mgr.ingest(makeDevice({ id: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
     expect(calls).toEqual(['throwing', 'ok']);
   });
 
@@ -110,7 +122,7 @@ describe('DeviceManager', () => {
     const mgr = new DeviceManager();
     const events: DeviceEvent[] = [];
     mgr.onEvent((evt) => events.push(evt));
-    mgr.ingest(makeDevice({ id: 1 }));
+    mgr.ingest(makeDevice({ playerId: 1 }));
     mgr.clear();
     expect(mgr.list()).toEqual([]);
     expect(events).toEqual(['added']); // only the ingest event

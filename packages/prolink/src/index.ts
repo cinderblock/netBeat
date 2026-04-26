@@ -137,7 +137,7 @@ export type {
   MixerStatus,
   SelfIdentity,
 } from './packets/types.js';
-export { BEAT_TIMING_TRACK_ENDS, DEVICE_TYPE_BYTE } from './packets/types.js';
+export { BEAT_TIMING_TRACK_ENDS, DEVICE_TYPE_BYTE, deviceTypeToCategory } from './packets/types.js';
 export {
   hasProlinkHeader,
   KIND_OFFSET,

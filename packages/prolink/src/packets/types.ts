@@ -6,6 +6,8 @@
  * has no parsing logic — just the value shapes we hand to library consumers.
  */
 
+import type { Device as CoreDevice, DeviceCategory } from '@netbeat/core';
+
 /**
  * High-level device category, derived from the device-type byte at packet
  * offset `0x34` of a keep-alive. Source:
@@ -30,29 +32,41 @@ export const DEVICE_TYPE_BYTE = {
   REKORDBOX: 0x04,
 } as const;
 
+/** Map prolink DeviceType to common DeviceCategory. */
+export function deviceTypeToCategory(type: DeviceType): DeviceCategory {
+  switch (type) {
+    case 'cdj':
+      return 'player';
+    case 'mixer':
+      return 'mixer';
+    case 'rekordbox':
+    case 'unknown':
+      return 'unknown';
+  }
+}
+
 /**
  * A device observed on the Pro DJ Link network.
  *
- * `id` is the player number broadcast by the device:
+ * Extends the common `Device` interface from `@netbeat/core` with
+ * prolink-specific fields. The `playerId` is the numeric player number:
  *   - `1`..`4` — CDJ slots (standard)
  *   - `5`..`6` — additional CDJ slots (CDJ-3000 era)
  *   - `0x21` (33) — mixer
- *   - `0x11` (17) — commonly observed for rekordbox laptop (unconfirmed;
- *     prolink-connect treats rekordbox IDs generically)
+ *   - `0x11` (17) — commonly observed for rekordbox laptop
  *
  * `ip` is dotted-quad. `mac` is the raw 6-byte hardware address, copied out
  * of the underlying packet buffer so it survives past the packet's lifetime.
  */
-export interface Device {
+export interface Device extends CoreDevice {
+  readonly protocol: 'prolink';
   /** Player number (`D` in dysentery notation). */
-  readonly id: number;
-  /** NUL-trimmed ASCII device name, up to 20 chars. */
-  readonly name: string;
-  /** Dotted-quad IPv4 address. */
+  readonly playerId: number;
+  /** Dotted-quad IPv4 address. Same value as `address`. */
   readonly ip: string;
   /** 6-byte hardware address, independent copy of the packet bytes. */
   readonly mac: Uint8Array;
-  /** Interpreted device type. */
+  /** Interpreted device type (prolink-specific classification). */
   readonly type: DeviceType;
   /** Raw device-type byte (`0x34` of the keep-alive). */
   readonly rawType: number;
