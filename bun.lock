@@ -16,17 +16,28 @@
         "netbeat": "./dist/index.js",
       },
       "dependencies": {
+        "@netbeat/core": "workspace:*",
         "@netbeat/prolink": "workspace:*",
         "@netbeat/stagelinq": "workspace:*",
       },
     },
+    "packages/core": {
+      "name": "@netbeat/core",
+      "version": "0.0.0",
+    },
     "packages/prolink": {
       "name": "@netbeat/prolink",
       "version": "0.0.0",
+      "dependencies": {
+        "@netbeat/core": "workspace:*",
+      },
     },
     "packages/stagelinq": {
       "name": "@netbeat/stagelinq",
       "version": "0.0.0",
+      "dependencies": {
+        "@netbeat/core": "workspace:*",
+      },
     },
   },
   "packages": {
@@ -49,6 +60,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.12", "", { "os": "win32", "cpu": "x64" }, "sha512-yMckRzTyZ83hkk8iDFWswqSdU8tvZxspJKnYNh7JZr/zhZNOlzH13k4ecboU6MurKExCe2HUkH75pGI/O2JwGA=="],
 
     "@netbeat/cli": ["@netbeat/cli@workspace:packages/cli"],
+
+    "@netbeat/core": ["@netbeat/core@workspace:packages/core"],
 
     "@netbeat/prolink": ["@netbeat/prolink@workspace:packages/prolink"],
 

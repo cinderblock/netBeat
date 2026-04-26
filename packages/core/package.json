@@ -1,0 +1,39 @@
+{
+  "name": "@netbeat/core",
+  "version": "0.0.0",
+  "description": "Common types and unified observer for netBeat DJ hardware observation.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Cameron Tacklind <cameron@tacklind.com>",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "dj",
+    "pioneer",
+    "denon",
+    "prolink",
+    "stagelinq",
+    "observer",
+    "beat-sync",
+    "network"
+  ]
+}

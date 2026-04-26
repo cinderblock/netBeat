@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/core" },
     { "path": "./packages/prolink" },
     { "path": "./packages/stagelinq" },
     { "path": "./packages/cli" }
