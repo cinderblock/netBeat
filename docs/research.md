@@ -50,8 +50,60 @@ findings and documentation are freely usable for independent implementation.
 
 ## Denon StageLinQ
 
-*(Planned; not in scope for initial implementation. Add references here as we
-find them.)*
+### TypeScript implementations
+
+- [`chrisle/StageLinq`](https://github.com/chrisle/StageLinq) — the most
+  comprehensive TypeScript implementation. MIT-licensed. Covers device
+  discovery, StateMap subscriptions, BeatInfo streaming, FileTransfer, and
+  Broadcast services. Includes a Wireshark Lua dissector for protocol
+  debugging, 205 unit tests, and CLI tools. Multi-platform.
+- [`MarByteBeep/StageLinq`](https://github.com/MarByteBeep/StageLinq) —
+  earlier Node.js library.
+
+### Go implementation
+
+- [`icedream/go-stagelinq`](https://github.com/icedream/go-stagelinq) — Go
+  language implementation. MIT-licensed. Covers device discovery, StateMap
+  access, and beat streaming. Primary testing on PRIME 4 devices. Includes
+  demo applications for discovery and beat streaming. Well-documented Go
+  API.
+
+### Python implementation (with protocol docs)
+
+- [`Jaxc/PyStageLinQ`](https://github.com/Jaxc/PyStageLinQ) — Python
+  implementation with the best standalone protocol documentation.
+  - [Protocol spec](https://github.com/Jaxc/PyStageLinQ/blob/main/StageLinQ_protocol.md)
+    covers link-local networking (169.254.0.0/16), discovery magic (`"airD"`),
+    service negotiation, text encoding (UTF-16BE), and token constraints
+    (MSB=1 prevents source replies). MIT-licensed, available on PyPI.
+
+### Community resources
+
+- [Engine DJ Community — StageLinQ Protocol/API Availability](https://community.enginedj.com/t/stagelinq-protocol-api-availability-part-1/27578)
+  — community discussion confirming almost all console parameters are
+  accessible via Wireshark reverse engineering (song info, knob/fader
+  positions, loop status).
+- [GitHub topic: stagelinq-protocol](https://github.com/topics/stagelinq-protocol)
+  — aggregates all StageLinQ-related repositories.
+
+### Protocol notes
+
+The StageLinQ protocol is entirely community-reverse-engineered via Wireshark
+packet analysis — Denon has not published official documentation. Key
+differences from Pioneer Pro DJ Link:
+
+1. **TCP-centric** — Pioneer uses UDP for all packet types; StageLinQ uses UDP
+   only for discovery (port 51337), then TCP for everything else.
+2. **Service-oriented** — devices expose a Directory service that advertises
+   available sub-services (StateMap, BeatInfo, FileTransfer, Broadcast,
+   TimeSynchronization), each on its own TCP port.
+3. **State subscriptions** — instead of periodic status packets, consumers
+   subscribe to specific state paths (e.g. `/Engine/Deck1/Play`) and receive
+   JSON-encoded updates.
+4. **Device identity** — 16-byte UUIDs instead of 1-byte player IDs. Token
+   MSB controls whether source devices will reply.
+5. **Encoding** — all strings are UTF-16BE with 4-byte length prefix; all
+   integers are big-endian.
 
 ## Distilled protocol reference
 

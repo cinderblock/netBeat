@@ -1,13 +1,10 @@
 {
-  "name": "@netbeat/cli",
+  "name": "@netbeat/stagelinq",
   "version": "0.0.0",
-  "description": "Diagnostic CLI for observing DJ hardware on the network.",
+  "description": "Read-only observer for Denon StageLinQ network traffic.",
   "type": "module",
   "license": "MIT",
   "author": "Cameron Tacklind <cameron@tacklind.com>",
-  "bin": {
-    "netbeat": "./dist/index.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -24,23 +21,20 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean",
-    "typecheck": "tsc --build",
-    "start": "bun run src/index.ts"
+    "typecheck": "tsc --build"
   },
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@netbeat/prolink": "workspace:*",
-    "@netbeat/stagelinq": "workspace:*"
-  },
   "keywords": [
-    "dj",
-    "pioneer",
-    "pro-dj-link",
     "denon",
     "stagelinq",
-    "cli",
-    "diagnostic"
+    "engine-dj",
+    "prime",
+    "sc6000",
+    "sc5000",
+    "dj",
+    "network",
+    "observer"
   ]
 }

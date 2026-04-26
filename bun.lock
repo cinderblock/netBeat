@@ -17,10 +17,15 @@
       },
       "dependencies": {
         "@netbeat/prolink": "workspace:*",
+        "@netbeat/stagelinq": "workspace:*",
       },
     },
     "packages/prolink": {
       "name": "@netbeat/prolink",
+      "version": "0.0.0",
+    },
+    "packages/stagelinq": {
+      "name": "@netbeat/stagelinq",
       "version": "0.0.0",
     },
   },
@@ -46,6 +51,8 @@
     "@netbeat/cli": ["@netbeat/cli@workspace:packages/cli"],
 
     "@netbeat/prolink": ["@netbeat/prolink@workspace:packages/prolink"],
+
+    "@netbeat/stagelinq": ["@netbeat/stagelinq@workspace:packages/stagelinq"],
 
     "@types/node": ["@types/node@25.6.0", "", { "dependencies": { "undici-types": "~7.19.0" } }, "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ=="],
 

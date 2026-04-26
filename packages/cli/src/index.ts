@@ -19,18 +19,24 @@ import {
   FilesystemMediaReader,
   listInterfaces,
   MetadataStore,
-  Observer,
   type PhaseState,
   PORTS,
-  PROTOCOL,
+  PROTOCOL as PROLINK_PROTOCOL,
+  Observer as ProlinkObserver,
   type TrackAnalysis,
 } from '@netbeat/prolink';
+import {
+  type DeckBeatInfo,
+  formatDeviceId,
+  PROTOCOL as STAGELINQ_PROTOCOL,
+  Observer as StageLinqObserver,
+} from '@netbeat/stagelinq';
 
 function printHelp(): void {
   console.log('netbeat — pre-alpha');
-  console.log(`  protocol: ${PROTOCOL}`);
+  console.log(`  protocols: ${PROLINK_PROTOCOL}, ${STAGELINQ_PROTOCOL}`);
   console.log(
-    `  udp ports: ${Object.values(PORTS)
+    `  prolink udp ports: ${Object.values(PORTS)
       .sort((a, b) => a - b)
       .join(', ')}`,
   );
@@ -38,23 +44,27 @@ function printHelp(): void {
   console.log('Usage: netbeat <command> [options]');
   console.log('');
   console.log('Commands:');
-  console.log('  observe           Announce as a virtual CDJ and log discovered devices');
+  console.log('  observe           Log discovered devices and real-time events');
   console.log('  pulse             Live track display with pulsing beat indicator');
   console.log('  interfaces        List IPv4 interfaces netbeat could announce from');
   console.log('');
-  console.log('`observe` options:');
-  console.log('  --interface <n>   Interface name or IP to announce from');
+  console.log('Common options:');
+  console.log('  --protocol <p>    Protocol: prolink (default) or stagelinq');
+  console.log('  --interface <n>   Interface name or IP to bind to');
+  console.log('  --name <s>        Device name to broadcast');
+  console.log('');
+  console.log('`observe` options (prolink):');
   console.log('  --id <n>          Player number to claim (default 7, avoid 1..4)');
-  console.log('  --name <s>        Device name to broadcast (≤ 20 ASCII chars)');
   console.log('  --passive         Receive only, do not announce');
   console.log('  --json            Output events as JSONL (one JSON object per line)');
   console.log('  --raw             Also log raw inbound packet kinds');
   console.log('  --dump <file>     Write JSONL raw packet capture to <file>');
   console.log('');
-  console.log('`pulse` options:');
-  console.log('  --interface <n>   Interface name or IP to announce from');
+  console.log('`observe` options (stagelinq):');
+  console.log('  --json            Output events as JSONL (one JSON object per line)');
+  console.log('');
+  console.log('`pulse` options (prolink):');
   console.log('  --id <n>          Player number to claim (default 7, avoid 1..4)');
-  console.log('  --name <s>        Device name to broadcast (≤ 20 ASCII chars)');
   console.log('  --passive         Receive only, do not announce');
   console.log('  --media <path>    Path to USB export for track metadata + phrases');
 }
@@ -194,6 +204,7 @@ async function runObserve(argv: string[]): Promise<void> {
     args: argv,
     strict: true,
     options: {
+      protocol: { type: 'string', default: 'prolink' },
       interface: { type: 'string' },
       id: { type: 'string' },
       name: { type: 'string' },
@@ -203,6 +214,14 @@ async function runObserve(argv: string[]): Promise<void> {
       dump: { type: 'string' },
     },
   });
+
+  if (values.protocol === 'stagelinq') {
+    await runStageLinqObserve(values);
+    return;
+  }
+  if (values.protocol !== 'prolink') {
+    throw new Error(`Unknown protocol: ${values.protocol} (expected "prolink" or "stagelinq")`);
+  }
 
   let id: number | undefined;
   if (values.id !== undefined) {
@@ -234,7 +253,7 @@ async function runObserve(argv: string[]): Promise<void> {
     console.log('');
   }
 
-  const observer = new Observer({ identity, passive: values.passive });
+  const observer = new ProlinkObserver({ identity, passive: values.passive });
 
   // ---- Device events ----
 
@@ -430,6 +449,288 @@ async function runObserve(argv: string[]): Promise<void> {
   await new Promise<void>(() => {});
 }
 
+// ---- StageLinQ observe command ----
+
+async function runStageLinqObserve(values: {
+  interface?: string;
+  name?: string;
+  json?: boolean;
+}): Promise<void> {
+  const jsonMode = values.json ?? false;
+  const observerName = values.name ?? 'netbeat';
+
+  if (!jsonMode) {
+    console.log('Starting StageLinQ observer mode\u2026');
+    console.log(`  name: ${JSON.stringify(observerName)}`);
+    if (values.interface) console.log(`  interface: ${values.interface}`);
+    console.log('');
+    console.log('Press Ctrl+C to stop.');
+    console.log('');
+  }
+
+  const observer = new StageLinqObserver({
+    name: observerName,
+    ...(values.interface !== undefined ? { bindAddress: values.interface } : {}),
+  });
+
+  // ---- Device events ----
+
+  observer.onDevice((event, device) => {
+    if (jsonMode) {
+      console.log(
+        JSON.stringify({
+          type: 'device',
+          ts: Date.now(),
+          event,
+          deviceId: formatDeviceId(device.deviceId),
+          name: device.model.name,
+          source: device.source,
+          address: device.address,
+          category: device.model.category,
+          deckCount: device.model.deckCount,
+          softwareVersion: device.softwareVersion,
+        }),
+      );
+    } else {
+      console.log(
+        `${ts()} device  ${event.padEnd(7)} ${device.model.name.padEnd(16)} ` +
+          `${device.address.padEnd(16)} ${JSON.stringify(device.source)}`,
+      );
+    }
+  });
+
+  // ---- State changes ----
+
+  observer.onStateChange((device, path, value) => {
+    if (jsonMode) {
+      console.log(
+        JSON.stringify({
+          type: 'state',
+          ts: Date.now(),
+          deviceId: formatDeviceId(device.deviceId),
+          device: device.model.name,
+          path,
+          value,
+        }),
+      );
+    } else {
+      const displayValue = typeof value === 'string' ? JSON.stringify(value) : String(value);
+      console.log(
+        `${ts()} state   ${device.model.name.padEnd(12)} ${path.padEnd(45)} ${displayValue}`,
+      );
+    }
+  });
+
+  // ---- Beat info ----
+
+  observer.onBeatInfo((device, decks, clock) => {
+    if (jsonMode) {
+      console.log(
+        JSON.stringify({
+          type: 'beatInfo',
+          ts: Date.now(),
+          deviceId: formatDeviceId(device.deviceId),
+          device: device.model.name,
+          clock: clock.toString(),
+          decks: decks.map((d) => ({
+            beat: +d.beat.toFixed(4),
+            totalBeats: +d.totalBeats.toFixed(2),
+            bpm: +d.bpm.toFixed(2),
+            samples: +d.samples.toFixed(0),
+          })),
+        }),
+      );
+    }
+    // Human mode: beat info fires very frequently — skip to avoid flooding.
+    // Use `pulse` for live beat visualization.
+  });
+
+  await observer.start();
+
+  const shutdown = async (signal: string): Promise<void> => {
+    if (!jsonMode) console.log(`\nReceived ${signal}, stopping\u2026`);
+    await observer.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  await new Promise<void>(() => {});
+}
+
+// ---- StageLinQ pulse command ----
+
+async function runStageLinqPulse(values: { interface?: string; name?: string }): Promise<void> {
+  const observerName = values.name ?? 'netbeat';
+
+  const observer = new StageLinqObserver({
+    name: observerName,
+    ...(values.interface !== undefined ? { bindAddress: values.interface } : {}),
+  });
+
+  // ---- State tracking ----
+
+  /** Latest beat info per device (keyed by formatted DeviceId). */
+  const deviceBeats = new Map<string, { decks: readonly DeckBeatInfo[]; clock: bigint }>();
+  /** Latest state values per device, for track name display. */
+  const deviceStates = new Map<string, Map<string, unknown>>();
+  /** Track names we've already printed (to avoid re-printing). */
+  const printedTracks = new Map<string, string>();
+  let pulseLineCount = 0;
+
+  // ---- Terminal helpers ----
+
+  function clearPulseArea(): void {
+    if (pulseLineCount > 0) {
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      for (let i = 0; i < pulseLineCount; i++) {
+        process.stdout.write(`${ANSI_CLEAR_LINE}\n`);
+      }
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      pulseLineCount = 0;
+    }
+  }
+
+  function printTrackLine(line: string): void {
+    clearPulseArea();
+    process.stdout.write(`${line}\n`);
+  }
+
+  // ---- Device events ----
+
+  observer.onDevice((event, device) => {
+    if (event === 'added') {
+      printTrackLine(
+        `${ANSI_DIM}${new Date().toLocaleTimeString('en-US', { hour12: false })}${ANSI_RESET}` +
+          `  ${device.model.name} connected ${ANSI_DIM}(${device.address})${ANSI_RESET}`,
+      );
+    } else if (event === 'removed') {
+      printTrackLine(
+        `${ANSI_DIM}${new Date().toLocaleTimeString('en-US', { hour12: false })}${ANSI_RESET}` +
+          `  ${device.model.name} disconnected`,
+      );
+      deviceBeats.delete(formatDeviceId(device.deviceId));
+      deviceStates.delete(formatDeviceId(device.deviceId));
+    }
+  });
+
+  // ---- State changes (track names) ----
+
+  observer.onStateChange((device, path, value) => {
+    const key = formatDeviceId(device.deviceId);
+    let states = deviceStates.get(key);
+    if (!states) {
+      states = new Map();
+      deviceStates.set(key, states);
+    }
+    states.set(path, value);
+
+    // Detect track loads by SongName changes.
+    if (path.endsWith('/Track/SongName') && typeof value === 'string' && value.length > 0) {
+      const deckMatch = /Deck(\d+)/.exec(path);
+      const deckNum = deckMatch ? deckMatch[1] : '?';
+      const trackKey = `${key}:${deckNum}`;
+      if (printedTracks.get(trackKey) !== value) {
+        printedTracks.set(trackKey, value);
+        const artist = states.get(path.replace('SongName', 'ArtistName'));
+        const titleParts = [artist, value]
+          .filter((s) => typeof s === 'string' && s.length > 0)
+          .join(' \u2014 ');
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+        printTrackLine(
+          `${ANSI_DIM}${time}${ANSI_RESET}  Deck ${deckNum} ${ANSI_DIM}\u25b8${ANSI_RESET} ` +
+            `${ANSI_BOLD}${titleParts}${ANSI_RESET}`,
+        );
+      }
+    }
+  });
+
+  // ---- Beat info ----
+
+  observer.onBeatInfo((device, decks, clock) => {
+    const key = formatDeviceId(device.deviceId);
+    deviceBeats.set(key, { decks, clock });
+  });
+
+  // ---- Render loop (30 fps) ----
+
+  function renderPulse(): void {
+    // Collect all decks with active beat data across all devices.
+    const activeDeckLines: { label: string; beat: number; bpm: number }[] = [];
+
+    for (const [, beatData] of deviceBeats) {
+      for (let i = 0; i < beatData.decks.length; i++) {
+        const deck = beatData.decks[i];
+        if (!deck || deck.bpm <= 0) continue;
+        activeDeckLines.push({
+          label: `D${i + 1}`,
+          beat: deck.beat,
+          bpm: deck.bpm,
+        });
+      }
+    }
+
+    if (activeDeckLines.length === 0) {
+      if (pulseLineCount > 0) clearPulseArea();
+      return;
+    }
+
+    // Move cursor up to overwrite previous lines.
+    if (pulseLineCount > 0) {
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+    }
+
+    let lines = 0;
+    for (const dl of activeDeckLines) {
+      process.stdout.write(ANSI_CLEAR_LINE);
+
+      // BeatInfo gives us the absolute beat position. The fractional part
+      // tells us where we are within the current beat (0 = just hit, ~1 = about to hit next).
+      // Beat-in-bar is beat mod 4 (1-indexed).
+      const beatFrac = dl.beat - Math.floor(dl.beat);
+      const beatInBar = (Math.floor(dl.beat) % 4) + 1;
+
+      let bar = '';
+      for (let b = 1; b <= 4; b++) {
+        if (b === beatInBar) {
+          bar += `${pulseColor(beatFrac, b === 1)}\u25cf${ANSI_RESET}`;
+        } else {
+          bar += `\x1b[38;2;50;50;50m\u00b7${ANSI_RESET}`;
+        }
+        if (b < 4) bar += ' ';
+      }
+
+      process.stdout.write(`  ${dl.label}  ${bar}  ${fmtBpm(dl.bpm)}\n`);
+      lines++;
+    }
+
+    pulseLineCount = lines;
+  }
+
+  // ---- Start ----
+
+  await observer.start();
+
+  console.log(`netbeat pulse \u2014 stagelinq mode`);
+  if (values.interface) console.log(`  interface: ${values.interface}`);
+  console.log('Listening for StageLinQ devices\u2026 Press Ctrl+C to stop.\n');
+
+  process.stdout.write(ANSI_HIDE_CURSOR);
+
+  const renderInterval = setInterval(renderPulse, 33);
+
+  const shutdown = async (signal: string): Promise<void> => {
+    clearInterval(renderInterval);
+    clearPulseArea();
+    process.stdout.write(ANSI_SHOW_CURSOR);
+    console.log(`Received ${signal}, stopping.`);
+    await observer.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  await new Promise<void>(() => {});
+}
+
 // ---- Pulse command ----
 
 async function runPulse(argv: string[]): Promise<void> {
@@ -437,6 +738,7 @@ async function runPulse(argv: string[]): Promise<void> {
     args: argv,
     strict: true,
     options: {
+      protocol: { type: 'string', default: 'prolink' },
       interface: { type: 'string' },
       id: { type: 'string' },
       name: { type: 'string' },
@@ -444,6 +746,14 @@ async function runPulse(argv: string[]): Promise<void> {
       media: { type: 'string' },
     },
   });
+
+  if (values.protocol === 'stagelinq') {
+    await runStageLinqPulse(values);
+    return;
+  }
+  if (values.protocol !== 'prolink') {
+    throw new Error(`Unknown protocol: ${values.protocol} (expected "prolink" or "stagelinq")`);
+  }
 
   let id: number | undefined;
   if (values.id !== undefined) {
@@ -475,7 +785,7 @@ async function runPulse(argv: string[]): Promise<void> {
     }
   }
 
-  const observer = new Observer({
+  const observer = new ProlinkObserver({
     identity,
     passive: values.passive,
     ...(metadataStore !== undefined ? { metadataStore } : {}),

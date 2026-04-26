@@ -32,7 +32,7 @@ audio stream.
 | Protocol | Status | Notes |
 |----------|--------|-------|
 | Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | **active** | Beat sync, status, phase tracking, track metadata (phrases, beat grid, cues via NFS/filesystem). |
-| Denon StageLinQ (Prime series) | future | Will slot in after the Pioneer surface is stable |
+| Denon StageLinQ (Prime series) | **in progress** | Discovery, StateMap, BeatInfo services implemented. Not yet validated against hardware. |
 
 ## Repository layout
 
@@ -41,8 +41,9 @@ This is a [Bun workspaces](https://bun.sh/docs/install/workspaces) monorepo.
 ```
 netBeat/
 ├── packages/
-│   ├── prolink/   # Pioneer Pro DJ Link protocol implementation
-│   └── cli/       # Diagnostic CLI (sniff / dump state from real hardware)
+│   ├── prolink/    # Pioneer Pro DJ Link protocol implementation
+│   ├── stagelinq/  # Denon StageLinQ protocol implementation
+│   └── cli/        # Diagnostic CLI (sniff / dump state from real hardware)
 ├── docs/
 │   └── research.md  # Prior art, protocol references, notes
 ├── tsconfig.base.json
@@ -76,6 +77,23 @@ Shows a 4-dot beat bar per deck that flashes in sync with the music
 Track loads print as permanent log lines; with `--media` pointed at a
 rekordbox USB export, you also get artist/title/key and live phrase
 labels (intro, chorus, outro, etc.).
+
+### Denon StageLinQ mode
+
+```bash
+# Observe Denon Prime-series devices on the network
+bun run packages/cli/src/index.ts observe --protocol stagelinq
+
+# Live beat pulse from Denon gear
+bun run packages/cli/src/index.ts pulse --protocol stagelinq
+
+# JSON output for integration with other tools
+bun run packages/cli/src/index.ts observe --protocol stagelinq --json > stagelinq.jsonl
+```
+
+StageLinQ mode discovers Denon devices (SC6000, PRIME 4, SC LIVE, etc.),
+subscribes to real-time state changes and beat data, and displays per-deck
+status. Track names appear as they load.
 
 ### Capturing data for offline analysis
 
