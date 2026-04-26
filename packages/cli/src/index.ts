@@ -705,7 +705,7 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
         if (b < 4) bar += ' ';
       }
 
-      frame += `  ${dl.label}  ${bar}  ${fmtBpm(dl.bpm)}\n`;
+      frame += `  ${dl.label}  ${bar}  ${dl.bpm.toFixed(1)}\n`;
       lines++;
     }
 
@@ -928,7 +928,7 @@ async function runPulse(argv: string[]): Promise<void> {
         if (phrase) phraseStr = `  ${ANSI_DIM}${phrase}${ANSI_RESET}`;
       }
 
-      frame += `  ${phase.playerId}  ${bar}  ${fmtBpm(phase.bpm)}${phraseStr}\n`;
+      frame += `  ${phase.playerId}  ${bar}  ${phase.bpm.toFixed(1)}${phraseStr}\n`;
       lines++;
     }
 
