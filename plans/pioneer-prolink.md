@@ -94,11 +94,12 @@ Pioneer surface stabilizes.
    once the XDJ powers on; a `netbeat replay` subcommand will re-emit a
    captured pcap on loopback so the state machine runs end-to-end
    without hardware.
-8. **Metadata path is deferred.** Both remotedb TCP (prolink-connect
-   primary) and NFS local-DB scrape (Crate Digger style) are large
-   undertakings. Re-evaluate once packet parsing is solid and we know
-   whether the 4-real-CDJ case (no free ID for us) actually bites the
-   user's scenes.
+8. **Metadata path is NFS-scrape.** Chosen over remotedb TCP because
+   (a) phrase analysis (PSSI) is only in `.EXT` files on USB/SD, not
+   exposed via remotedb, and (b) NFS works with 4 CDJs on the bus (no
+   player-ID slot needed). Implementation complete: ANLZ parsers, PDB
+   parser, filesystem + NFS media readers, MetadataStore, Observer
+   integration.
 9. **Publishing identity.** `package.json` points at
    `https://github.com/cinderblock/netBeat.git`. Packages are scoped as
    `@netbeat/...`. Flag if either is wrong — both were inferred.
@@ -252,20 +253,19 @@ changes. Current step is marked **→**.
    mode for all parsed events (beats, CDJ status, mixer status, on-air,
    absolute-position, phase). `--dump <file>` captures raw packets.
    Human-readable mode logs status changes only (not every 200ms update).
-8. **→ `netbeat replay` CLI subcommand.** Read a pcap (or JSONL), re-emit
+8. **`netbeat replay` CLI subcommand.** Read a pcap (or JSONL), re-emit
    UDP packets on loopback with preserved inter-arrival timing. End-to-
    end test of the state machine without hardware.
 9. **Full 3-phase claim choreography.** Only if real hardware rejects
    the shortcut. Not expected to be needed.
-10. **Track metadata — deferred**. Pick remotedb TCP vs. NFS-scrape once
-    we know the real-world constraints. Likely NFS-scrape (works with 4
-    CDJs, also unlocks phrase analysis / PSSI).
-11. **Phrase analysis (PSSI).** Beat-indexed mood/phrase intervals from
-    rekordbox `.EXT` files on the USB. XOR-obfuscated body with a known
-    19-byte mask. Requires NFS-scrape path from step 10.
-12. **Hot cues, memory cues, beat grid, waveforms.** Same NFS-scrape
-    path. Layered onto the deck state.
-13. **Denon StageLinQ** — separate plan file, separate package.
+10. **Track metadata via NFS-scrape** — done. ANLZ file parsers (beat
+    grid PQTZ, legacy cues PCOB, extended cues PCO2, phrase analysis
+    PSSI), PDB database parser, FilesystemMediaReader, MetadataStore
+    caching layer, NFS v2 client (portmapper → mount → lookup/read),
+    NfsMediaReader implementing MediaReader interface, Observer
+    integration (auto-fetch on track-ID change, `onTrackAnalysis()`
+    handler, `trackAnalysis` in `DeckState`). 337 tests total.
+11. **→ Denon StageLinQ** — separate plan file, separate package.
 
 ## Findings / gotchas
 
@@ -400,11 +400,28 @@ Expand as we learn.)
 - [x] CLI `observe --json` JSONL output + full event surfacing (beats,
   status, mixer, on-air, absolute-position, phase). Human-readable mode
   logs status changes only. 211 tests total.
-- [ ] Commit all current work (scaffold through CLI event surfacing).
+- [ ] Commit all current work (scaffold through metadata).
 - [ ] `netbeat replay` CLI subcommand (pcap re-emit on loopback).
-- [ ] Metadata path (deferred; pick remotedb vs NFS-scrape later).
-- [ ] Phrase analysis (PSSI, XOR-obfuscated, NFS-only).
-- [ ] Hot cues / memory cues / beat grid / waveforms.
+- [x] Metadata path: NFS-scrape chosen (works with 4 CDJs, unlocks PSSI
+  phrase analysis which remotedb cannot expose).
+- [x] ANLZ file parsers — `metadata/anlz.ts`, `metadata/beat-grid.ts`,
+  `metadata/cues.ts`, `metadata/phrases.ts`. Beat grid (PQTZ), legacy
+  cues (PCOB), extended cues (PCO2), phrase analysis (PSSI) with XOR
+  deobfuscation. 68 tests.
+- [x] PDB database parser — `metadata/pdb.ts`. Rekordbox export.pdb
+  binary format (page-based, NOT SQLite). Track/artist/album/genre/
+  key/label/color resolution. DeviceSQL string encoding. Builder for
+  fixture generation. 20 tests.
+- [x] Filesystem media reader — `metadata/media-reader.ts`. MediaReader
+  interface + FilesystemMediaReader + MetadataStore (PDB loading, ANLZ
+  .DAT/.EXT merging, cue deduplication, caching). 13 tests.
+- [x] NFS/RPC client — `nfs/rpc.ts` (Sun RPC/XDR), `nfs/nfs-client.ts`
+  (portmapper → mount → NFS v2 LOOKUP/READ), `nfs/index.ts`
+  (NfsMediaReader). 26 tests.
+- [x] Observer metadata integration — `onTrackAnalysis()` handler,
+  `trackAnalysis` in DeckState, auto-fetch on trackId change via
+  MetadataStore. CLI `--json` surfaces track analysis. 337 tests total
+  (17 test files, 995 expect() calls).
 
 ## Open questions for the user
 

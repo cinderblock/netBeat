@@ -6,9 +6,9 @@ synchronize itself to what a DJ is doing live without needing to analyze the
 audio stream.
 
 > **Status:** pre-alpha. Observer mode works end-to-end with live beat
-> sync, CDJ status, mixer status, channels-on-air, and CDJ-3000 absolute
-> position. Verified against real XDJ-XZ hardware. Metadata/track-info
-> queries are not yet implemented.
+> sync, CDJ status, mixer status, channels-on-air, CDJ-3000 absolute
+> position, and track metadata (phrases, beat grid, cues) via NFS or
+> local USB export. Verified against real XDJ-XZ hardware.
 
 ## Goals
 
@@ -31,7 +31,7 @@ audio stream.
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | **active** | Beat sync, status, phase tracking working. Metadata deferred. |
+| Pioneer Pro DJ Link (CDJs, XDJs, DJM mixers, rekordbox) | **active** | Beat sync, status, phase tracking, track metadata (phrases, beat grid, cues via NFS/filesystem). |
 | Denon StageLinQ (Prime series) | future | Will slot in after the Pioneer surface is stable |
 
 ## Repository layout
@@ -61,6 +61,22 @@ This announces as a virtual CDJ on the specified interface and streams
 discovered devices, beats, CDJ status changes, mixer status, and
 channels-on-air to the terminal.
 
+### Live beat pulse display
+
+```bash
+# Minimal — pulsing beat indicator per deck, track IDs on load
+bun run packages/cli/src/index.ts pulse --interface 10.255.0.77
+
+# With metadata — track names, BPM, key, and current phrase section
+bun run packages/cli/src/index.ts pulse --interface 10.255.0.77 --media /path/to/usb
+```
+
+Shows a 4-dot beat bar per deck that flashes in sync with the music
+(cyan on downbeat, white on beats 2–4, smooth 24-bit color fade).
+Track loads print as permanent log lines; with `--media` pointed at a
+rekordbox USB export, you also get artist/title/key and live phrase
+labels (intro, chorus, outro, etc.).
+
 ### Capturing data for offline analysis
 
 ```bash
@@ -85,6 +101,7 @@ bun run packages/cli/src/index.ts observe --interface 10.255.0.77 --passive --js
 | `onAir` | port 50001, kind 0x03 | Per-channel on-air state from DJM mixers |
 | `position` | port 50001, kind 0x0b | CDJ-3000 only: playhead ms, track length, pitch, BPM |
 | `phase` | computed | Sub-beat/bar phase interpolated between beats |
+| `trackAnalysis` | NFS or filesystem | Phrases (PSSI), beat grid, cue points, track metadata (title, artist, key, BPM) |
 
 ## Prior art
 

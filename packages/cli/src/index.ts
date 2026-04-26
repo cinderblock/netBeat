@@ -16,11 +16,14 @@ import { parseArgs } from 'node:util';
 import {
   buildIdentity,
   type CdjStatus,
+  FilesystemMediaReader,
   listInterfaces,
+  MetadataStore,
   Observer,
   type PhaseState,
   PORTS,
   PROTOCOL,
+  type TrackAnalysis,
 } from '@netbeat/prolink';
 
 function printHelp(): void {
@@ -36,6 +39,7 @@ function printHelp(): void {
   console.log('');
   console.log('Commands:');
   console.log('  observe           Announce as a virtual CDJ and log discovered devices');
+  console.log('  pulse             Live track display with pulsing beat indicator');
   console.log('  interfaces        List IPv4 interfaces netbeat could announce from');
   console.log('');
   console.log('`observe` options:');
@@ -46,6 +50,13 @@ function printHelp(): void {
   console.log('  --json            Output events as JSONL (one JSON object per line)');
   console.log('  --raw             Also log raw inbound packet kinds');
   console.log('  --dump <file>     Write JSONL raw packet capture to <file>');
+  console.log('');
+  console.log('`pulse` options:');
+  console.log('  --interface <n>   Interface name or IP to announce from');
+  console.log('  --id <n>          Player number to claim (default 7, avoid 1..4)');
+  console.log('  --name <s>        Device name to broadcast (≤ 20 ASCII chars)');
+  console.log('  --passive         Receive only, do not announce');
+  console.log('  --media <path>    Path to USB export for track metadata + phrases');
 }
 
 function printInterfaces(): void {
@@ -75,6 +86,34 @@ function fmtBpm(bpm: number): string {
 
 function fmtPitch(pitch: number): string {
   return `${pitch >= 0 ? '+' : ''}${pitch.toFixed(2)}%`;
+}
+
+// ---- ANSI terminal helpers ----
+
+const ANSI_RESET = '\x1b[0m';
+const ANSI_DIM = '\x1b[2m';
+const ANSI_BOLD = '\x1b[1m';
+const ANSI_HIDE_CURSOR = '\x1b[?25l';
+const ANSI_SHOW_CURSOR = '\x1b[?25h';
+const ANSI_CLEAR_LINE = '\x1b[2K';
+
+/**
+ * 24-bit ANSI foreground color for a pulsing beat dot.
+ *
+ * `beatFrac` runs 0 → ~1 within each beat (0 = just hit).
+ * Cubic decay produces a sharp flash that quickly fades —
+ * perceptually similar to a lighting-desk beat flash.
+ *
+ * Downbeat (beat 1) pulses cyan; beats 2–4 pulse white.
+ */
+function pulseColor(beatFrac: number, isDownbeat: boolean): string {
+  const intensity = (1 - beatFrac) ** 3;
+  if (isDownbeat) {
+    const ch = Math.round(30 + 225 * intensity);
+    return `\x1b[38;2;0;${ch};${ch}m`;
+  }
+  const v = Math.round(50 + 205 * intensity);
+  return `\x1b[38;2;${v};${v};${v}m`;
 }
 
 /** Track last-known play state per player to detect changes. */
@@ -391,6 +430,206 @@ async function runObserve(argv: string[]): Promise<void> {
   await new Promise<void>(() => {});
 }
 
+// ---- Pulse command ----
+
+async function runPulse(argv: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args: argv,
+    strict: true,
+    options: {
+      interface: { type: 'string' },
+      id: { type: 'string' },
+      name: { type: 'string' },
+      passive: { type: 'boolean', default: false },
+      media: { type: 'string' },
+    },
+  });
+
+  let id: number | undefined;
+  if (values.id !== undefined) {
+    id = Number.parseInt(values.id, 10);
+    if (!Number.isInteger(id) || id < 0 || id > 0xff) {
+      throw new Error(`--id must be 0..255, got ${JSON.stringify(values.id)}`);
+    }
+  }
+
+  const identity = buildIdentity({
+    ...(values.interface !== undefined ? { interface: values.interface } : {}),
+    ...(id !== undefined ? { id } : {}),
+    ...(values.name !== undefined ? { name: values.name } : {}),
+  });
+
+  // Optional local metadata source (USB export / rekordbox library)
+  let metadataStore: MetadataStore | undefined;
+  if (values.media) {
+    const reader = new FilesystemMediaReader(values.media);
+    metadataStore = new MetadataStore(reader);
+    try {
+      const count = await metadataStore.loadDatabase();
+      console.log(`Loaded ${count} tracks from ${values.media}`);
+    } catch (err) {
+      console.error(
+        `Warning: could not load PDB from ${values.media}: ${err instanceof Error ? err.message : err}`,
+      );
+      metadataStore = undefined;
+    }
+  }
+
+  const observer = new Observer({
+    identity,
+    passive: values.passive,
+    ...(metadataStore !== undefined ? { metadataStore } : {}),
+  });
+
+  // ---- State ----
+
+  const pulseLastTrackId = new Map<number, number>();
+  const deckAnalysis = new Map<number, TrackAnalysis>();
+  const deckBeatCounter = new Map<number, number>();
+  let pulseLineCount = 0;
+
+  // ---- Terminal helpers ----
+
+  function clearPulseArea(): void {
+    if (pulseLineCount > 0) {
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      for (let i = 0; i < pulseLineCount; i++) {
+        process.stdout.write(`${ANSI_CLEAR_LINE}\n`);
+      }
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      pulseLineCount = 0;
+    }
+  }
+
+  function printTrackLine(line: string): void {
+    clearPulseArea();
+    process.stdout.write(`${line}\n`);
+  }
+
+  // ---- Track change detection ----
+
+  observer.onStatus((status) => {
+    deckBeatCounter.set(status.deviceId, status.beatCounter);
+
+    const prev = pulseLastTrackId.get(status.deviceId);
+    pulseLastTrackId.set(status.deviceId, status.trackId);
+
+    // Print a track-change line when no metadata store is configured.
+    // With a metadata store, onTrackAnalysis prints the richer version.
+    if (status.trackId !== prev && status.trackId > 0 && !metadataStore) {
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+      printTrackLine(
+        `${ANSI_DIM}${time}${ANSI_RESET}  Deck ${status.deviceId} ${ANSI_DIM}▸${ANSI_RESET} ` +
+          `Track ${status.trackId}  ${ANSI_DIM}${fmtBpm(status.effectiveBpm)} BPM${ANSI_RESET}`,
+      );
+    }
+  });
+
+  // ---- Metadata enrichment ----
+
+  observer.onTrackAnalysis((playerId, analysis) => {
+    deckAnalysis.set(playerId, analysis);
+    if (analysis.metadata) {
+      const m = analysis.metadata;
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+      const titleParts = [m.artist, m.title].filter(Boolean).join(' \u2014 ');
+      const extras = [m.bpm ? `${fmtBpm(m.bpm)} BPM` : null, m.key || null]
+        .filter(Boolean)
+        .join('  ');
+      printTrackLine(
+        `${ANSI_DIM}${time}${ANSI_RESET}  Deck ${playerId} ${ANSI_DIM}\u25b8${ANSI_RESET} ` +
+          `${ANSI_BOLD}${titleParts}${ANSI_RESET}  ${ANSI_DIM}${extras}${ANSI_RESET}`,
+      );
+    }
+  });
+
+  // ---- Phrase lookup ----
+
+  function findCurrentPhrase(analysis: TrackAnalysis, beatCounter: number): string | null {
+    if (!analysis.phrases || beatCounter === 0 || beatCounter >= 0xffffffff) return null;
+    let currentKind: string | null = null;
+    for (const p of analysis.phrases.phrases) {
+      if (p.beatNumber <= beatCounter) {
+        currentKind = p.kind;
+      } else {
+        break;
+      }
+    }
+    return currentKind;
+  }
+
+  // ---- Render loop (30 fps) ----
+
+  function renderPulse(): void {
+    const phases = observer.phases();
+    if (phases.length === 0) {
+      if (pulseLineCount > 0) clearPulseArea();
+      return;
+    }
+
+    phases.sort((a, b) => a.playerId - b.playerId);
+
+    // Move cursor up to overwrite previous pulse lines.
+    if (pulseLineCount > 0) {
+      process.stdout.write(`\x1b[${pulseLineCount}A`);
+    }
+
+    let lines = 0;
+    for (const phase of phases) {
+      process.stdout.write(ANSI_CLEAR_LINE);
+
+      // 4-beat bar: active beat pulses with 24-bit color, others dim.
+      let bar = '';
+      for (let b = 1; b <= 4; b++) {
+        if (b === phase.beatInBar) {
+          bar += `${pulseColor(phase.beat, b === 1)}\u25cf${ANSI_RESET}`;
+        } else {
+          bar += `\x1b[38;2;50;50;50m\u00b7${ANSI_RESET}`;
+        }
+        if (b < 4) bar += ' ';
+      }
+
+      // Current phrase section (if metadata available).
+      const analysis = deckAnalysis.get(phase.playerId);
+      const beatCount = deckBeatCounter.get(phase.playerId) ?? 0;
+      let phraseStr = '';
+      if (analysis) {
+        const phrase = findCurrentPhrase(analysis, beatCount);
+        if (phrase) phraseStr = `  ${ANSI_DIM}${phrase}${ANSI_RESET}`;
+      }
+
+      process.stdout.write(`  ${phase.playerId}  ${bar}  ${fmtBpm(phase.bpm)}${phraseStr}\n`);
+      lines++;
+    }
+
+    pulseLineCount = lines;
+  }
+
+  // ---- Start ----
+
+  await observer.start();
+
+  const mode = values.passive ? 'passive' : 'observer';
+  console.log(`netbeat pulse \u2014 ${mode} mode on ${identity.ip}`);
+  console.log('Listening for beats\u2026 Press Ctrl+C to stop.\n');
+
+  process.stdout.write(ANSI_HIDE_CURSOR);
+
+  const renderInterval = setInterval(renderPulse, 33);
+
+  const shutdown = async (signal: string): Promise<void> => {
+    clearInterval(renderInterval);
+    clearPulseArea();
+    process.stdout.write(ANSI_SHOW_CURSOR);
+    console.log(`Received ${signal}, stopping.`);
+    await observer.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  await new Promise<void>(() => {});
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
 
@@ -404,6 +643,10 @@ async function main(): Promise<void> {
   }
   if (command === 'observe') {
     await runObserve(rest);
+    return;
+  }
+  if (command === 'pulse') {
+    await runPulse(rest);
     return;
   }
 

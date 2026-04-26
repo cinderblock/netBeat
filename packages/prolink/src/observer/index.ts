@@ -28,6 +28,8 @@
  */
 
 import type { RemoteInfo } from 'node:dgram';
+import type { MetadataStore } from '../metadata/media-reader.js';
+import type { TrackAnalysis } from '../metadata/types.js';
 import { type AbsolutePosition, parseAbsolutePosition } from '../packets/absolute-position.js';
 import { parseBeat } from '../packets/beat.js';
 import { buildKeepAlive, parseKeepAlive } from '../packets/keepalive.js';
@@ -97,6 +99,13 @@ export type OnAirHandler = (onAir: ChannelsOnAir) => void;
 export type AbsolutePositionHandler = (position: AbsolutePosition) => void;
 
 /**
+ * Track analysis handler. Called when a track's metadata + analysis data
+ * has been fetched (or re-fetched) from the media. The `playerId` identifies
+ * which deck loaded the track.
+ */
+export type TrackAnalysisHandler = (playerId: number, analysis: TrackAnalysis) => void;
+
+/**
  * Aggregated snapshot of everything known about a single deck (or mixer)
  * at a point in time. Composes data from multiple packet sources:
  *
@@ -125,6 +134,8 @@ export interface DeckState {
   readonly phase: PhaseState | null;
   /** Latest absolute-position (CDJ-3000 only). `null` if device doesn't support it. */
   readonly position: AbsolutePosition | null;
+  /** Track analysis (metadata + beat grid + cues + phrases). `null` if no metadata store configured or track not yet fetched. */
+  readonly trackAnalysis: TrackAnalysis | null;
 }
 
 export interface ObserverOptions {
@@ -152,6 +163,12 @@ export interface ObserverOptions {
    * disturbing the network. Default: `false` (true observer mode).
    */
   readonly passive?: boolean;
+  /**
+   * Optional MetadataStore for auto-fetching track analysis when a
+   * player loads a new track. The store must be loaded (call
+   * `store.loadDatabase()`) before passing it here.
+   */
+  readonly metadataStore?: MetadataStore;
 }
 
 /**
@@ -170,10 +187,17 @@ export class Observer {
   private readonly mixerStatusHandlers = new Set<MixerStatusHandler>();
   private readonly onAirHandlers = new Set<OnAirHandler>();
   private readonly absolutePositionHandlers = new Set<AbsolutePositionHandler>();
+  private readonly trackAnalysisHandlers = new Set<TrackAnalysisHandler>();
   /** Latest absolute-position per player (CDJ-3000 only). */
   private readonly positions = new Map<number, AbsolutePosition>();
   /** Latest CDJ status per player. */
   private readonly lastStatus = new Map<number, CdjStatus>();
+  /** Last known track ID per player (for change detection). */
+  private readonly lastTrackId = new Map<number, number>();
+  /** Cached track analysis per player. */
+  private readonly trackAnalysisMap = new Map<number, TrackAnalysis>();
+  /** Optional metadata store for auto-fetching track analysis. */
+  private readonly metadataStore: MetadataStore | null;
   /**
    * Per-player dedup for beat packets. The XDJ-XZ (and possibly other combo
    * units) sends each beat packet twice, ~40–110 ms apart, with identical
@@ -190,6 +214,7 @@ export class Observer {
   constructor(options: ObserverOptions) {
     this.identity = options.identity;
     this.passive = options.passive ?? false;
+    this.metadataStore = options.metadataStore ?? null;
 
     this.transport = new UdpTransport(options.transport);
     this.deviceManager = new DeviceManager(options.deviceManager);
@@ -253,6 +278,18 @@ export class Observer {
     this.absolutePositionHandlers.add(handler);
     return () => {
       this.absolutePositionHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to track analysis events. Called when a new track's metadata
+   * has been auto-fetched from the metadata store. Requires a `metadataStore`
+   * in the observer options. Returns an unsubscribe fn.
+   */
+  onTrackAnalysis(handler: TrackAnalysisHandler): () => void {
+    this.trackAnalysisHandlers.add(handler);
+    return () => {
+      this.trackAnalysisHandlers.delete(handler);
     };
   }
 
@@ -372,6 +409,7 @@ export class Observer {
       status: this.lastStatus.get(playerId) ?? null,
       phase: this.phaseTracker.getPhase(playerId),
       position: this.positions.get(playerId) ?? null,
+      trackAnalysis: this.trackAnalysisMap.get(playerId) ?? null,
     };
   }
 
@@ -391,6 +429,7 @@ export class Observer {
         status: this.lastStatus.get(device.id) ?? null,
         phase: this.phaseTracker.getPhase(device.id),
         position: this.positions.get(device.id) ?? null,
+        trackAnalysis: this.trackAnalysisMap.get(device.id) ?? null,
       });
     }
     return result;
@@ -431,6 +470,8 @@ export class Observer {
     this.onAirIds.clear();
     this.positions.clear();
     this.lastStatus.clear();
+    this.lastTrackId.clear();
+    this.trackAnalysisMap.clear();
     this.started = false;
   }
 
@@ -551,6 +592,15 @@ export class Observer {
           this.onAirIds.delete(status.deviceId);
         }
 
+        // Detect track changes and auto-fetch metadata.
+        if (this.metadataStore && status.trackId > 0) {
+          const prevTrackId = this.lastTrackId.get(status.deviceId);
+          if (prevTrackId !== status.trackId) {
+            this.lastTrackId.set(status.deviceId, status.trackId);
+            this.fetchTrackAnalysis(status.deviceId, status.trackId);
+          }
+        }
+
         for (const handler of this.statusHandlers) {
           try {
             handler(status);
@@ -595,6 +645,33 @@ export class Observer {
     // Store a copy — the packet buffer may be reused.
     this.lastBeatTiming.set(deviceId, new Uint8Array(timing));
     return false;
+  }
+
+  /**
+   * Asynchronously fetch track analysis from the metadata store.
+   * Fire-and-forget — errors are swallowed to avoid disrupting
+   * the packet-handling loop.
+   */
+  private fetchTrackAnalysis(playerId: number, trackId: number): void {
+    if (!this.metadataStore) return;
+    const store = this.metadataStore;
+
+    store
+      .getTrackAnalysis(trackId)
+      .then((analysis) => {
+        if (!analysis) return;
+        this.trackAnalysisMap.set(playerId, analysis);
+        for (const handler of this.trackAnalysisHandlers) {
+          try {
+            handler(playerId, analysis);
+          } catch {
+            // A faulty consumer handler must not break the observer.
+          }
+        }
+      })
+      .catch(() => {
+        // Metadata fetch failed — silently continue.
+      });
   }
 
   private isSelf(device: Device): boolean {
