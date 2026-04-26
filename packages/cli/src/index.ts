@@ -583,11 +583,12 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
 
   function clearPulseArea(): void {
     if (pulseLineCount > 0) {
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      let buf = `\x1b[${pulseLineCount}A`;
       for (let i = 0; i < pulseLineCount; i++) {
-        process.stdout.write(`${ANSI_CLEAR_LINE}\n`);
+        buf += `${ANSI_CLEAR_LINE}\n`;
       }
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      buf += `\x1b[${pulseLineCount}A`;
+      process.stdout.write(buf);
       pulseLineCount = 0;
     }
   }
@@ -677,14 +678,16 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
       return;
     }
 
-    // Move cursor up to overwrite previous lines.
+    // Build the entire frame in one string to avoid flicker.
+    let frame = '';
+
     if (pulseLineCount > 0) {
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      frame += `\x1b[${pulseLineCount}A`;
     }
 
     let lines = 0;
     for (const dl of activeDeckLines) {
-      process.stdout.write(ANSI_CLEAR_LINE);
+      frame += ANSI_CLEAR_LINE;
 
       // BeatInfo gives us the absolute beat position. The fractional part
       // tells us where we are within the current beat (0 = just hit, ~1 = about to hit next).
@@ -702,10 +705,11 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
         if (b < 4) bar += ' ';
       }
 
-      process.stdout.write(`  ${dl.label}  ${bar}  ${fmtBpm(dl.bpm)}\n`);
+      frame += `  ${dl.label}  ${bar}  ${fmtBpm(dl.bpm)}\n`;
       lines++;
     }
 
+    process.stdout.write(frame);
     pulseLineCount = lines;
   }
 
@@ -805,11 +809,12 @@ async function runPulse(argv: string[]): Promise<void> {
 
   function clearPulseArea(): void {
     if (pulseLineCount > 0) {
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      let buf = `\x1b[${pulseLineCount}A`;
       for (let i = 0; i < pulseLineCount; i++) {
-        process.stdout.write(`${ANSI_CLEAR_LINE}\n`);
+        buf += `${ANSI_CLEAR_LINE}\n`;
       }
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      buf += `\x1b[${pulseLineCount}A`;
+      process.stdout.write(buf);
       pulseLineCount = 0;
     }
   }
@@ -882,14 +887,17 @@ async function runPulse(argv: string[]): Promise<void> {
 
     phases.sort((a, b) => a.playerId - b.playerId);
 
-    // Move cursor up to overwrite previous pulse lines.
+    // Build the entire frame in one string to avoid flicker from
+    // multiple writes (each write triggers a terminal repaint).
+    let frame = '';
+
     if (pulseLineCount > 0) {
-      process.stdout.write(`\x1b[${pulseLineCount}A`);
+      frame += `\x1b[${pulseLineCount}A`;
     }
 
     let lines = 0;
     for (const phase of phases) {
-      process.stdout.write(ANSI_CLEAR_LINE);
+      frame += ANSI_CLEAR_LINE;
 
       // 4-beat bar: active beat pulses with 24-bit color, others dim.
       let bar = '';
@@ -911,10 +919,11 @@ async function runPulse(argv: string[]): Promise<void> {
         if (phrase) phraseStr = `  ${ANSI_DIM}${phrase}${ANSI_RESET}`;
       }
 
-      process.stdout.write(`  ${phase.playerId}  ${bar}  ${fmtBpm(phase.bpm)}${phraseStr}\n`);
+      frame += `  ${phase.playerId}  ${bar}  ${fmtBpm(phase.bpm)}${phraseStr}\n`;
       lines++;
     }
 
+    process.stdout.write(frame);
     pulseLineCount = lines;
   }
 
