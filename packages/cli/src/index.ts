@@ -577,6 +577,8 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
   const deviceStates = new Map<string, Map<string, unknown>>();
   /** Track names we've already printed (to avoid re-printing). */
   const printedTracks = new Map<string, string>();
+  /** Hysteresis: only update displayed BPM when it changes by ≥ 0.05. */
+  const stableBpm = new Map<string, number>();
   let pulseLineCount = 0;
 
   // ---- Terminal helpers ----
@@ -705,7 +707,15 @@ async function runStageLinqPulse(values: { interface?: string; name?: string }):
         if (b < 4) bar += ' ';
       }
 
-      frame += `  ${dl.label}  ${bar}  ${dl.bpm.toFixed(1)}\n`;
+      // Stabilize displayed BPM — only update on genuine changes.
+      const bpmKey = dl.label;
+      const prevBpm = stableBpm.get(bpmKey);
+      if (prevBpm === undefined || Math.abs(dl.bpm - prevBpm) >= 0.05) {
+        stableBpm.set(bpmKey, dl.bpm);
+      }
+      const bpm = stableBpm.get(bpmKey) ?? dl.bpm;
+
+      frame += `  ${dl.label}  ${bar}  ${bpm.toFixed(1)}\n`;
       lines++;
     }
 
@@ -812,6 +822,8 @@ async function runPulse(argv: string[]): Promise<void> {
   const pulseLastTrackId = new Map<number, number>();
   const deckAnalysis = new Map<number, TrackAnalysis>();
   const deckBeatCounter = new Map<number, number>();
+  /** Hysteresis: only update displayed BPM when it changes by ≥ 0.05. */
+  const stableBpm = new Map<number, number>();
   let pulseLineCount = 0;
 
   // ---- Terminal helpers ----
@@ -919,6 +931,13 @@ async function runPulse(argv: string[]): Promise<void> {
         if (b < 4) bar += ' ';
       }
 
+      // Stabilize displayed BPM — only update on genuine changes.
+      const prevBpm = stableBpm.get(phase.playerId);
+      if (prevBpm === undefined || Math.abs(phase.bpm - prevBpm) >= 0.05) {
+        stableBpm.set(phase.playerId, phase.bpm);
+      }
+      const bpm = stableBpm.get(phase.playerId) ?? phase.bpm;
+
       // Current phrase section (if metadata available).
       const analysis = deckAnalysis.get(phase.playerId);
       const beatCount = deckBeatCounter.get(phase.playerId) ?? 0;
@@ -928,7 +947,7 @@ async function runPulse(argv: string[]): Promise<void> {
         if (phrase) phraseStr = `  ${ANSI_DIM}${phrase}${ANSI_RESET}`;
       }
 
-      frame += `  ${phase.playerId}  ${bar}  ${phase.bpm.toFixed(1)}${phraseStr}\n`;
+      frame += `  ${phase.playerId}  ${bar}  ${bpm.toFixed(1)}${phraseStr}\n`;
       lines++;
     }
 
