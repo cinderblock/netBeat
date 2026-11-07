@@ -164,6 +164,8 @@ bun run lint          # biome check
 bun run format        # biome format --write
 ```
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, typecheck and tests with Bun, and builds and loads the packages on Node 20, 22, 24 and 26, on every push and pull request.
+
 ## License
 
 [MIT](LICENSE) © Cameron Tacklind
